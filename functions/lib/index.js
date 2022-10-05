@@ -83,21 +83,22 @@ exports.stripePayment = functions.https.onRequest(async (req, res) => {
         res.status(401).send({ success: false, error: message });
     }
 });
-exports.onCallCreated = functions.https.onRequest(async (req, res) => {
+exports.onNodeExpired = functions.https.onRequest(async (req, res) => {
     var _a;
     const tasksClient = new tasks_1.CloudTasksClient();
-    const callId = req.body.call_id;
+    const nid = req.body.nid;
+    const nodeType = req.body.type;
     const expirationTime = req.body.expiry;
     const projectId = (_a = admin.instanceId().app.options.projectId) !== null && _a !== void 0 ? _a : 'unknown';
     const huchaToken = process.env.HUCHA_TOKEN;
     const huchaHost = process.env.HUCHA_HOST;
     functions.logger.debug(`QueuePath Project: ${projectId}`);
-    const queuePath = tasksClient.queuePath(projectId, 'us-central1', 'call-tasks');
-    const url = `${huchaHost}/expire-call/${huchaToken}`;
+    const queuePath = tasksClient.queuePath(projectId, 'us-central1', 'expire-node-tasks');
+    const url = `${huchaHost}/expire-node/${huchaToken}`;
     const task = Task.create({
         httpRequest: {
             httpMethod: HttpMethod.POST,
-            body: Buffer.from(JSON.stringify({ 'callId': callId })).toString('base64'),
+            body: Buffer.from(JSON.stringify({ 'nid': nid, 'type': nodeType })).toString('base64'),
             url
         },
         scheduleTime: {
@@ -107,7 +108,7 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
     // @ts-ignore
     task.httpRequest.headers = { 'Content-Type': 'application/json' };
     try {
-        functions.logger.info(`Creating task for call ${callId} expiring at ${expirationTime}`);
+        functions.logger.info(`Creating task for ${nodeType}: ${nid} expiring at ${expirationTime}`);
         // @ts-ignore
         const createdTaskData = await tasksClient.createTask({ parent: queuePath, task });
         // @ts-ignore
@@ -115,9 +116,9 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
         const taskName = createdTask.name;
         res.json({
             'task_name': taskName,
-            'call_id': callId
+            'nid': nid
         });
-        functions.logger.info(`Task ${taskName} created successfully for call ${callId}`);
+        functions.logger.info(`Task ${taskName} created successfully for ${nodeType}: ${nid}`);
     }
     catch (e) {
         // @ts-ignore
