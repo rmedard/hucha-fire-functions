@@ -2,14 +2,12 @@ import * as functions from "firebase-functions";
 import {Request, Response} from "firebase-functions";
 import Stripe from 'stripe';
 import * as admin from 'firebase-admin';
+import {firestore} from 'firebase-admin';
 
-import {CloudTasksClient} from '@google-cloud/tasks';
-import {google} from '@google-cloud/tasks/build/protos/protos';
-import Task = google.cloud.tasks.v2.Task;
-import HttpRequest = google.cloud.tasks.v2.HttpRequest;
-import HttpMethod = google.cloud.tasks.v2.HttpMethod;
-import Timestamp = google.protobuf.Timestamp;
-import CreateTaskRequest = google.cloud.tasks.v2.CreateTaskRequest;
+import Firestore = firestore.Firestore;
+import GeoPoint = firestore.GeoPoint;
+import Timestamp = firestore.Timestamp;
+import {GcTasksService} from "./gc-tasks-service";
 
 
 admin.initializeApp();
@@ -23,7 +21,7 @@ admin.initializeApp();
 
 exports.stripePayment = functions.https.onRequest(async (req: Request, res: Response) => {
     const secretKey = functions.config().stripe.testkey;
-    const apiVersionDate = '2022-08-01';
+    const apiVersionDate = '2022-11-15';
 
     const stripe = new Stripe(secretKey, {
         apiVersion: apiVersionDate, typescript: true
@@ -94,48 +92,187 @@ exports.stripePayment = functions.https.onRequest(async (req: Request, res: Resp
 });
 
 exports.onNodeExpired = functions.https.onRequest(async (req: Request, res: Response) => {
-    const tasksClient = new CloudTasksClient();
-    const nid = req.body.nid;
+    const nodeUuid = req.body.uuid;
     const nodeType = req.body.type;
-    const expirationTime = req.body.expiry as number;
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const huchaToken = process.env.HUCHA_TOKEN;
     const huchaHost = process.env.HUCHA_HOST;
-    functions.logger.debug(`QueuePath Project: ${projectId}`);
-    const queuePath = tasksClient.queuePath(projectId, 'us-central1', 'expire-node-tasks');
-    const url = `${huchaHost}/expire-node/${huchaToken}`;
+    const backendUrl = `${huchaHost}/expire-node/${huchaToken}`;
+    const payload = {'uuid': nodeUuid, 'type': nodeType};
 
-    const task = Task.create({
-        httpRequest: {
-            httpMethod: HttpMethod.POST,
-            body: Buffer.from(JSON.stringify({'nid': nid, 'type': nodeType})).toString('base64'),
-            url
-        } as HttpRequest,
-        scheduleTime: {
-            seconds: expirationTime
-        } as Timestamp
-    });
-
-    // @ts-ignore
-    task.httpRequest.headers = {'Content-Type': 'application/json'};
-
+    const firestore = new Firestore({projectId: projectId});
     try {
-        functions.logger.info(`Creating task for ${nodeType}: ${nid} expiring at ${expirationTime}`);
-
+        if (nodeType == 'call') {
+            /** Delete live document **/
+            await firestore.collection('live_calls').doc(nodeUuid).delete();
+        }
+        /** Expire node in backend **/
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fetch = require('node-fetch');
+        functions.logger.info(`Calling backend to expire node ${payload.uuid}`);
         // @ts-ignore
-        const createdTaskData = await tasksClient.createTask({parent: queuePath, task} as CreateTaskRequest);
-        // @ts-ignore
-        const createdTask = createdTaskData[0] as Task;
-        const taskName = createdTask.name;
-        res.json({
-            'task_name': taskName,
-            'nid': nid
-        });
-        functions.logger.info(`Task ${taskName} created successfully for ${nodeType}: ${nid}`);
+        fetch(backendUrl, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+            .then((res: any) => res.text())
+            .then((text: string) => functions.logger.info(`Node ${nodeUuid} of type ${nodeType} expired successfully. Message: ${text}`))
+            .catch((err: any) => functions.logger.error(err));
     } catch (e) {
         // @ts-ignore
         const message = e.toString();
-        functions.logger.error("An error occurred!", {message: message});
+        functions.logger.error("Expiring node failed: ", {message: message});
         res.status(401).send({success: false, error: message});
     }
 });
+
+exports.onOrderCreated = functions.https.onRequest(async (req: Request, res: Response) => {
+    const fireNodeExpirationFunc = process.env.FIRE_NODE_EXPIRATION_FUNC ?? '';
+    const orderId = req.body.orderUuid;
+    /** Create GC task **/
+    try {
+        const payload = Buffer.from(JSON.stringify({'uuid': orderId, 'type': 'order'})).toString('base64');
+        const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime);
+        functions.logger.info(`Task ${taskName} created successfully for order: ${orderId}`);
+        res.status(201).send({success: true, message: 'Order task created successfully'});
+    } catch (e) {
+        functions.logger.error('Creating task failed: ', e);
+        // @ts-ignore
+        res.status(404).send({success: false, message: `Creating order task failed: ${e.toString()}`});
+    }
+});
+
+exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Response) => {
+    const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
+    const fireNodeExpirationFunc = process.env.FIRE_NODE_EXPIRATION_FUNC ?? '';
+    const call = req.body as Call;
+    try {
+        const firestore = new Firestore({projectId: projectId});
+        const order = call.order;
+        await firestore.collection('live_calls').doc(call.id).set({
+            delivery_address: new GeoPoint(order.deliveryAddressLat, order.deliveryAddressLng),
+            delivery_address_full: order.deliveryAddress,
+            pickup_address: order.hasPickupAddress ? new GeoPoint(order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0) : null,
+            pickup_address_full: order.pickupAddress ?? '',
+            expiration_time: Timestamp.fromMillis(call.expirationTime),
+            order_id: order.id,
+            caller_id: call.caller.id,
+            order_type: order.type,
+            caller_photo: call.caller.photo,
+            caller_name: call.caller.firstname
+        });
+        functions.logger.info(`Live Call ${call.id} created successfully`);
+
+        /** Create GC task **/
+        try {
+            const payload = Buffer.from(JSON.stringify({'uuid': call.id, 'type': 'call'})).toString('base64');
+            const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, call.expirationTime);
+            functions.logger.info(`Task ${taskName} created successfully for call: ${call.id}`);
+            res.status(201).send({success: true, message: 'Call created successfully'});
+        } catch (e) {
+            functions.logger.error('Creating task failed: ', e);
+            // @ts-ignore
+            res.status(404).send({success: false, message: `Creating call task failed: ${e.toString()}`});
+        }
+    } catch (e) {
+        functions.logger.error(`Live Call ${call.id} creation failed: `, e);
+        // @ts-ignore
+        res.status(404).send({success: false, message: e.toString()});
+    }
+});
+
+exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Response) => {
+    const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
+    const bid = req.body as Bid;
+    try {
+        const firestore = new Firestore({projectId: projectId});
+        await firestore.collection('live_bids').doc(bid.id).set({
+            call_id: bid.callId,
+            call_amount: bid.proposedAmount,
+            caller_id: bid.caller.id,
+            caller_name: bid.caller.firstname,
+            caller_photo: bid.caller.photo,
+            bidder_id: bid.bidder.id,
+            bidder_name: bid.bidder.firstname,
+            bidder_photo: bid.bidder.photo,
+            call_can_bargain: bid.callCanBargain,
+            bargain_amount: bid.bargainAmount,
+            bargain_reply_amount: bid.bargainReplyAmount
+        });
+        functions.logger.info(`Bid ${bid.id} created successfully`);
+        res.status(201).send({success: true, message: 'Bid created successfully'});
+    } catch (e) {
+        functions.logger.error(`Bid ${bid.id} creation failed`);
+        // @ts-ignore
+        res.status(401).send({success: false, message: e.toString()});
+    }
+});
+
+exports.onBargainPlaced = functions.https.onRequest(async (req: Request, res: Response) => {
+    const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
+    const bidId = req.body.id;
+    const isExecutorBargain = req.body.isExecutorBargain;
+    let bargainData: object;
+    if (isExecutorBargain) {
+        bargainData = {bargain_amount: req.body.bargain_amount};
+    } else {
+        bargainData = {bargain_reply_amount: req.body.bargainReplyAmount};
+    }
+    try {
+        const firestore = new Firestore({projectId: projectId});
+        await firestore.collection('live_bids').doc(bidId).set(bargainData, {merge: true});
+        if (isExecutorBargain) {
+            // @ts-ignore
+            functions.logger.info(`Bargain of ${bargainData.bargain_amount} Euro placed on bid ${bidId}`);
+        } else {
+            // @ts-ignore
+            functions.logger.info(`Bargain of ${bargainData.bargain_reply_amount} Euro placed on Bid ${bid.id}`);
+        }
+        res.status(201).send({success: true, message: 'Bargain placed successfully'});
+    } catch (e) {
+        functions.logger.error(`Bargain placement on Bid ${bidId} failed`);
+        // @ts-ignore
+        res.status(401).send({success: false, message: e.toString()});
+    }
+
+});
+
+interface Call {
+    id: string,
+    expirationTime: number
+    order: Order,
+    caller: UserDetails
+}
+
+interface Order {
+    id: string,
+    type: string,
+    deliveryAddressLat: number,
+    deliveryAddressLng: number,
+    deliveryAddress: string,
+    hasPickupAddress: boolean,
+    pickupAddressLat?: number,
+    pickupAddressLng?: number,
+    pickupAddress?: string,
+}
+
+interface UserDetails {
+    id: string,
+    photo: string,
+    firstname: string
+}
+
+interface Bid {
+    id: string,
+    callId: string,
+    caller: UserDetails,
+    bidder: UserDetails,
+    proposedAmount: number,
+    callCanBargain: boolean,
+    bargainAmount: number,
+    bargainReplyAmount: number
+}
