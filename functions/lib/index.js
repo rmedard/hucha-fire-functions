@@ -8,7 +8,10 @@ var Firestore = firebase_admin_1.firestore.Firestore;
 var GeoPoint = firebase_admin_1.firestore.GeoPoint;
 var Timestamp = firebase_admin_1.firestore.Timestamp;
 const gc_tasks_service_1 = require("./gc-tasks-service");
-admin.initializeApp();
+const gc_messaging_service_1 = require("./gc-messaging-service");
+// @ts-ignore
+// import * as serviceAccount from '../lib/dinger-cash-344019-firebase-adminsdk-46fq9-cbc12f333c.json';
+admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
 //
@@ -18,7 +21,7 @@ admin.initializeApp();
 // });
 exports.stripePayment = functions.https.onRequest(async (req, res) => {
     const secretKey = functions.config().stripe.testkey;
-    const apiVersionDate = '2022-11-15';
+    const apiVersionDate = '2023-08-16';
     const stripe = new stripe_1.default(secretKey, {
         apiVersion: apiVersionDate, typescript: true
     });
@@ -96,8 +99,13 @@ exports.onNodeExpired = functions.https.onRequest(async (req, res) => {
     const firestore = new Firestore({ projectId: projectId });
     try {
         if (nodeType == 'call') {
-            /** Delete live document **/
-            await firestore.collection('live_calls').doc(nodeUuid).delete();
+            /** Delete live call and related bids **/
+            const callReference = firestore.collection('live_calls').doc(nodeUuid);
+            await firestore.collection('live_bids')
+                .where('call_id', '==', nodeUuid)
+                .get()
+                .then((bids) => bids.forEach((bid) => bid.ref.delete()));
+            await callReference.delete();
         }
         /** Expire node in backend **/
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -155,8 +163,9 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
             pickup_address_full: (_e = order.pickupAddress) !== null && _e !== void 0 ? _e : '',
             expiration_time: Timestamp.fromMillis(call.expirationTime),
             order_id: order.id,
-            caller_id: call.caller.id,
             order_type: order.type,
+            caller_id: call.caller.id,
+            caller_device_id: call.caller.deviceId,
             caller_photo: call.caller.photo,
             caller_name: call.caller.firstname
         });
@@ -187,12 +196,14 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
     try {
         const firestore = new Firestore({ projectId: projectId });
         await firestore.collection('live_bids').doc(bid.id).set({
+            status: bid.status,
             call_id: bid.callId,
             call_amount: bid.proposedAmount,
             caller_id: bid.caller.id,
             caller_name: bid.caller.firstname,
             caller_photo: bid.caller.photo,
             bidder_id: bid.bidder.id,
+            bidder_device_id: bid.bidder.deviceId,
             bidder_name: bid.bidder.firstname,
             bidder_photo: bid.bidder.photo,
             call_can_bargain: bid.callCanBargain,
@@ -200,12 +211,21 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
             bargain_reply_amount: bid.bargainReplyAmount
         });
         functions.logger.info(`Bid ${bid.id} created successfully`);
+        const callData = await firestore.collection('live_calls').doc(bid.callId).get();
+        // @ts-ignore
+        const deviceId = callData.data().caller_device_id;
+        const messagingService = new gc_messaging_service_1.GcMessagingService();
+        functions.logger.info(`Sending notification to device: ${deviceId}`);
+        await messagingService.sendNotification(deviceId, {
+            title: 'A new bid placed',
+            body: `A new bid of ${bid.proposedAmount} Euro has been placed now.`
+        });
         res.status(201).send({ success: true, message: 'Bid created successfully' });
     }
     catch (e) {
-        functions.logger.error(`Bid ${bid.id} creation failed`);
+        functions.logger.error(`Bid ${bid.id} creation failed`, e);
         // @ts-ignore
-        res.status(401).send({ success: false, message: e.toString() });
+        res.status(404).send({ success: false, message: e.toString() });
     }
 });
 exports.onBargainPlaced = functions.https.onRequest(async (req, res) => {
