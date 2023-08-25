@@ -32,6 +32,7 @@ export class GcTasksService {
      * @param {string} payload Task payload to be sent
      * @param {string} targetUrl URL to be called when task executes
      * @param {number} triggerTimeInMillis When task triggers
+     * @param {string} taskName The assigned name of the task
      */
     async createTask(payload: string, targetUrl: string, triggerTimeInMillis: number, taskName: string): Promise<string> {
         const request: HttpRequest = {
