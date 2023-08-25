@@ -142,7 +142,7 @@ exports.onOrderCreated = functions.https.onRequest(async (req: Request, res: Res
     /** Create GC task **/
     try {
         const payload = Buffer.from(JSON.stringify({'uuid': orderId, 'type': 'order'})).toString('base64');
-        const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime);
+        const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime, `expire-order-${orderId}`);
         functions.logger.info(`Task ${taskName} created successfully for order: ${orderId}`);
         res.status(201).send({success: true, message: 'Order task created successfully'});
     } catch (e) {
@@ -177,7 +177,7 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
         /** Create GC task **/
         try {
             const payload = Buffer.from(JSON.stringify({'uuid': call.id, 'type': 'call'})).toString('base64');
-            const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, call.expirationTime);
+            const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, call.expirationTime, `expire-call-${call.id}`);
             functions.logger.info(`Task ${taskName} created successfully for call: ${call.id}`);
             res.status(201).send({success: true, message: 'Call created successfully'});
         } catch (e) {
