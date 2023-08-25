@@ -2,7 +2,7 @@ import {messaging} from "firebase-admin";
 import Notification = messaging.Notification;
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
-import TokenMessage = messaging.TokenMessage;
+import {AndroidConfig, AndroidNotification, TokenMessage} from "firebase-admin/lib/messaging";
 
 /**
  * Google Cloud Messaging Service
@@ -18,6 +18,12 @@ export class GcMessagingService {
         const messageId = await admin.messaging().send(
             {
                 notification: notification,
+                android: {
+                    notification: {
+                        title: notification.title,
+                        body: notification.body
+                    } as AndroidNotification
+                } as AndroidConfig,
                 token: deviceId
             } as TokenMessage);
         functions.logger.info(`Notification: ${messageId} sent to FCM`);

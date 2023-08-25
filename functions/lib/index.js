@@ -9,8 +9,6 @@ var GeoPoint = firebase_admin_1.firestore.GeoPoint;
 var Timestamp = firebase_admin_1.firestore.Timestamp;
 const gc_tasks_service_1 = require("./gc-tasks-service");
 const gc_messaging_service_1 = require("./gc-messaging-service");
-// @ts-ignore
-// import * as serviceAccount from '../lib/dinger-cash-344019-firebase-adminsdk-46fq9-cbc12f333c.json';
 admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
