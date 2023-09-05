@@ -142,7 +142,7 @@ exports.onOrderCreated = functions.https.onRequest(async (req: Request, res: Res
     /** Create GC task **/
     try {
         const payload = Buffer.from(JSON.stringify({'uuid': orderId, 'type': 'order'})).toString('base64');
-        const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime, `expire-order-${orderId}`);
+        const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime);
         functions.logger.info(`Task ${taskName} created successfully for order: ${orderId}`);
         res.status(201).send({success: true, message: 'Order task created successfully'});
     } catch (e) {
@@ -177,7 +177,7 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
         /** Create GC task **/
         try {
             const payload = Buffer.from(JSON.stringify({'uuid': call.id, 'type': 'call'})).toString('base64');
-            const taskName = await (new GcTasksService()).createTask(payload, fireNodeExpirationFunc, call.expirationTime, `expire-call-${call.id}`);
+            const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, call.expirationTime);
             functions.logger.info(`Task ${taskName} created successfully for call: ${call.id}`);
             res.status(201).send({success: true, message: 'Call created successfully'});
         } catch (e) {
@@ -218,12 +218,17 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
         const deviceId = callData.data().caller_device_id;
         const messagingService = new GcMessagingService();
         functions.logger.info(`Sending notification to device: ${deviceId}`);
+        const data = new Map<string, string>([
+            ['callId', bid.callId]
+        ]);
         await messagingService.sendNotification(
             deviceId,
+            'newBid',
             {
                 title: 'A new bid placed',
                 body: `A new bid of ${bid.proposedAmount} Euro has been placed now.`
-            } as Notification);
+            } as Notification,
+            data);
         res.status(201).send({success: true, message: 'Bid created successfully'});
     } catch (e) {
         functions.logger.error(`Bid ${bid.id} creation failed`, e);

@@ -1,14 +1,14 @@
-import {CloudTasksClient} from "@google-cloud/tasks";
 import * as admin from 'firebase-admin';
 import {firestore} from 'firebase-admin';
 import {google} from "@google-cloud/tasks/build/protos/protos";
 import Task = google.cloud.tasks.v2.Task;
-import HttpRequest = google.cloud.tasks.v2.HttpRequest;
 import Timestamp = firestore.Timestamp;
-import HttpMethod = google.cloud.tasks.v2.HttpMethod;
-import CreateTaskRequest = google.cloud.tasks.v2.CreateTaskRequest;
 import ITask = google.cloud.tasks.v2.ITask;
 import View = google.cloud.tasks.v2.Task.View;
+import HttpMethod = google.cloud.tasks.v2.HttpMethod;
+import IHttpRequest = google.cloud.tasks.v2.IHttpRequest;
+import ICreateTaskRequest = google.cloud.tasks.v2.ICreateTaskRequest;
+import {CloudTasksClient} from '@google-cloud/tasks/build/src/v2';
 
 /**
  * Google Cloud Tasks Service
@@ -32,31 +32,25 @@ export class GcTasksService {
      * @param {string} payload Task payload to be sent
      * @param {string} targetUrl URL to be called when task executes
      * @param {number} triggerTimeInMillis When task triggers
-     * @param {string} taskName The assigned name of the task
      */
-    async createTask(payload: string, targetUrl: string, triggerTimeInMillis: number, taskName: string): Promise<string> {
-        const request: HttpRequest = {
-            httpMethod: HttpMethod.POST,
-            headers: {'Content-Type': 'application/json'} as { [k: string]: string },
-            body: payload,
-            url: targetUrl
-        } as HttpRequest;
-
-        const taskProperties: CreateTaskRequest = {
+    async createGcTask(payload: string, targetUrl: string, triggerTimeInMillis: number): Promise<string> {
+        const createdTaskData = await this.tasksClient.createTask({
             parent: this.queuePath,
-            task: Task.create({
-                httpRequest: HttpRequest.create(request),
+            task: {
+                httpRequest: {
+                    httpMethod: HttpMethod.POST,
+                    headers: {'Content-Type': 'application/json'} as { [k: string]: string },
+                    body: payload,
+                    url: targetUrl
+                } as IHttpRequest,
                 scheduleTime: Timestamp.fromMillis(triggerTimeInMillis),
-                view: View.FULL,
-                name: taskName
-            } as ITask),
+                view: View.FULL
+            } as ITask,
             responseView: View.FULL,
             toJSON: function(): { [k: string]: any; } {
                 throw new Error("Function not implemented.");
             }
-        };
-        const taskRequest: CreateTaskRequest = CreateTaskRequest.create(taskProperties);
-        const createdTaskData = await this.tasksClient.createTask(taskRequest);
+        } as ICreateTaskRequest);
         const createdTask = createdTaskData[0] as Task;
         return createdTask.name;
     }

@@ -12,9 +12,12 @@ export class GcMessagingService {
     /**
      *
      * @param {string} deviceId FCM Token used as device identifier
+     * @param {string} notificationType Notification Type
      * @param {Notification} notification The actual notification object
+     * @param {Map<string, string>} data Data to be sent back
      */
-    async sendNotification(deviceId: string, notification: Notification): Promise<void> {
+    async sendNotification(deviceId: string, notificationType: string, notification: Notification, data: Map<string, string>): Promise<void> {
+        const dataSet = data.set('notification-type', notificationType);
         const messageId = await admin.messaging().send(
             {
                 notification: notification,
@@ -24,6 +27,7 @@ export class GcMessagingService {
                         body: notification.body
                     } as AndroidNotification
                 } as AndroidConfig,
+                data: Object.fromEntries(dataSet.entries()),
                 token: deviceId
             } as TokenMessage);
         functions.logger.info(`Notification: ${messageId} sent to FCM`);
