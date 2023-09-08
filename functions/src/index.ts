@@ -226,7 +226,7 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
             'newBid',
             {
                 title: 'A new bid placed',
-                body: `A new bid of ${bid.proposedAmount} Euro has been placed now.`
+                body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
             } as Notification,
             data);
         res.status(201).send({success: true, message: 'Bid created successfully'});

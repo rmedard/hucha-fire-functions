@@ -219,7 +219,7 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
         ]);
         await messagingService.sendNotification(deviceId, 'newBid', {
             title: 'A new bid placed',
-            body: `A new bid of ${bid.proposedAmount} Euro has been placed now.`
+            body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
         }, data);
         res.status(201).send({ success: true, message: 'Bid created successfully' });
     }

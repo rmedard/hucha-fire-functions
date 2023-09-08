@@ -17,7 +17,7 @@ export class GcMessagingService {
      * @param {Map<string, string>} data Data to be sent back
      */
     async sendNotification(deviceId: string, notificationType: string, notification: Notification, data: Map<string, string>): Promise<void> {
-        const dataSet = data.set('notification-type', notificationType);
+        const dataSet = data.set('notificationType', notificationType);
         const messageId = await admin.messaging().send(
             {
                 notification: notification,
