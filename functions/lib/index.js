@@ -163,7 +163,6 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
             order_id: order.id,
             order_type: order.type,
             caller_id: call.caller.id,
-            caller_device_id: call.caller.deviceId,
             caller_photo: call.caller.photo,
             caller_name: call.caller.firstname
         });
@@ -189,9 +188,9 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
 });
 exports.onBidCreated = functions.https.onRequest(async (req, res) => {
     var _a;
-    const projectId = (_a = admin.instanceId().app.options.projectId) !== null && _a !== void 0 ? _a : 'unknown';
     const bid = req.body;
     try {
+        const projectId = (_a = admin.instanceId().app.options.projectId) !== null && _a !== void 0 ? _a : 'unknown';
         const firestore = new Firestore({ projectId: projectId });
         await firestore.collection('live_bids').doc(bid.id).set({
             status: bid.status,
@@ -201,7 +200,6 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
             caller_name: bid.caller.firstname,
             caller_photo: bid.caller.photo,
             bidder_id: bid.bidder.id,
-            bidder_device_id: bid.bidder.deviceId,
             bidder_name: bid.bidder.firstname,
             bidder_photo: bid.bidder.photo,
             call_can_bargain: bid.callCanBargain,
@@ -209,15 +207,17 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
             bargain_reply_amount: bid.bargainReplyAmount
         });
         functions.logger.info(`Bid ${bid.id} created successfully`);
-        const callData = await firestore.collection('live_calls').doc(bid.callId).get();
         // @ts-ignore
-        const deviceId = callData.data().caller_device_id;
+        functions.logger.info('### Fetching device id for customer {}', bid.caller.id);
+        const callerDevice = await firestore.collection('user_devices').doc(bid.caller.id).get();
+        // @ts-ignore
+        const callerDeviceId = callerDevice.data().device_id;
         const messagingService = new gc_messaging_service_1.GcMessagingService();
-        functions.logger.info(`Sending notification to device: ${deviceId}`);
+        functions.logger.info(`Sending notification to device: ${callerDeviceId}`);
         const data = new Map([
-            ['callId', bid.callId]
+            ['call_id', bid.callId]
         ]);
-        await messagingService.sendNotification(deviceId, 'newBid', {
+        await messagingService.sendNotification(bid.caller.id, 'newBid', {
             title: 'A new bid placed',
             body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
         }, data);
