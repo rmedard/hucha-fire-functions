@@ -295,29 +295,33 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
         }
 
         if (bidStatus == 'accepted') {
-            await messagingService.sendNotification(
-                bidModel.bidder.id,
-                'bidAccepted',
-                {
-                    title: 'Your bid has been accepted',
-                    body: `Your bid of ${bidModel.bargainAmount} has been accepted.`
-                } as Notification,
-                new Map<string, string>()
-            ).catch((e) => res.status(401).send({success: false, message: e.toString()}));
+            bidDocRef
+                .set({'status': bidStatus})
+                .then(() => messagingService.sendNotification(
+                    bidModel.bidder.id,
+                    'bidAccepted',
+                    {
+                        title: 'Your bid has been accepted',
+                        body: `Your bid of ${bidModel.bargainAmount} has been accepted.`
+                    } as Notification,
+                    new Map<string, string>()
+                ).catch((e) => res.status(401).send({success: false, message: e.toString()})));
         }
 
         if (bidStatus == 'confirmed') {
-            await messagingService.sendNotification(
-                bidModel.caller.id,
-                'bidConfirmed',
-                {
-                    title: 'Order delivery accepted',
-                    body: `Your order delivery has been accepted.`
-                } as Notification,
-                new Map<string, string>([
-                    ['call_id', bidModel.callId]
-                ])
-            ).catch((e) => res.status(401).send({success: false, message: e.toString()}));
+            bidDocRef
+                .set({'status': bidStatus})
+                .then(() => messagingService.sendNotification(
+                    bidModel.caller.id,
+                    'bidConfirmed',
+                    {
+                        title: 'Order delivery confirmed',
+                        body: `Your order delivery has been confirmed by the serviceman.`
+                    } as Notification,
+                    new Map<string, string>([
+                        ['call_id', bidModel.callId]
+                    ])
+                ).catch((e) => res.status(401).send({success: false, message: e.toString()})));
         }
 
         if (bidStatus == 'renounced') {
