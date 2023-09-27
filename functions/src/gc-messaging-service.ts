@@ -43,9 +43,9 @@ export class GcMessagingService {
                             token: deviceData.device_id
                         } as TokenMessage)
                         .then((messageId) => functions.logger.info(`Notification: ${messageId} sent to FCM`))
-                        .catch((err) => functions.logger.error('Sending notification to customer {} failed', targetCustomerId, err));
+                        .catch((err) => functions.logger.error(`Sending notification to customer ${targetCustomerId} failed`, err));
                 } else {
-                    functions.logger.error('Sending notification failed. Device unknown for customer {}', targetCustomerId);
+                    functions.logger.error(`Sending notification failed. Device unknown for customer ${targetCustomerId}`);
                 }
             })
             .catch((err) => functions.logger.error('Fetching user device failed', err));

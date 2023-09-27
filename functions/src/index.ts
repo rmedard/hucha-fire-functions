@@ -209,29 +209,24 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
             bidder_photo: bid.bidder.photo,
             call_can_bargain: bid.callCanBargain,
             bargain_amount: bid.bargainAmount,
-            bargain_reply_amount: bid.bargainReplyAmount
+            bargain_reply_amount: bid.bargainReplyAmount,
+            created_at: Timestamp.now()
         });
         functions.logger.info(`Bid ${bid.id} created successfully`);
         functions.logger.info('### Fetching device id for customer {}', bid.caller.id);
-        const callerDevice = await firestore.collection('user_devices').doc(bid.caller.id).get();
-        const callerDeviceData = callerDevice.data();
-        if (callerDeviceData !== undefined) {
-            const callerDeviceId = Models.toCustomerDevice(callerDevice.id, callerDeviceData);
-            const messagingService = new GcMessagingService();
-            functions.logger.info(`Sending notification to device: ${callerDeviceId}`);
-            const data = new Map<string, string>([
-                ['call_id', bid.callId]
-            ]);
-            await messagingService.sendNotification(
-                bid.caller.id,
-                'newBid',
-                {
-                    title: 'A new bid placed',
-                    body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
-                } as Notification,
-                data);
-            res.status(201).send({success: true, message: 'Bid created successfully'});
-        }
+        const messagingService = new GcMessagingService();
+        const data = new Map<string, string>([
+            ['call_id', bid.callId]
+        ]);
+        await messagingService.sendNotification(
+            bid.caller.id,
+            'newBid',
+            {
+                title: 'A new bid placed',
+                body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
+            } as Notification,
+            data);
+        res.status(201).send({success: true, message: 'Bid created successfully'});
     } catch (e) {
         functions.logger.error(`Bid ${bid.id} creation failed`, e);
         // @ts-ignore
@@ -296,7 +291,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
 
         if (bidStatus == 'accepted') {
             bidDocRef
-                .set({'status': bidStatus})
+                .update({'status': bidStatus})
                 .then(() => messagingService.sendNotification(
                     bidModel.bidder.id,
                     'bidAccepted',
@@ -310,7 +305,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
 
         if (bidStatus == 'confirmed') {
             bidDocRef
-                .set({'status': bidStatus})
+                .update({'status': bidStatus})
                 .then(() => messagingService.sendNotification(
                     bidModel.caller.id,
                     'bidConfirmed',
