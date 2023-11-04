@@ -1,5 +1,7 @@
 import {firestore} from "firebase-admin";
 import DocumentData = firestore.DocumentData;
+import GeoPoint = firestore.GeoPoint;
+import {GeohashRange} from "geofire-common";
 
 /**
  *
@@ -46,6 +48,48 @@ export class Models {
             deviceId: data.device_id
         } as CustomerDevice;
     }
+
+    /**
+     *
+     * @param {string} id Call id
+     * @param {any} data call data
+     * @return {Call} mapped call
+     */
+    static toCall(id: string, data: DocumentData): Call {
+        const hasPickAddress: boolean = data.pickup_address !== null;
+        const order = {
+            id: data.order_id,
+            type: data.order_type,
+            deliveryAddressLat: (data.delivery_address as GeoPoint).latitude,
+            deliveryAddressLng: (data.delivery_address as GeoPoint).longitude,
+            deliveryAddress: data.delivery_address_full,
+            hasPickupAddress: hasPickAddress
+        } as Order;
+
+        if (hasPickAddress) {
+            order.pickupAddress = data.pickup_address_full;
+            order.pickupAddressGeoHash = data.pickup_address_geo_hash;
+            order.pickupAddressLat = (data.pickup_address as GeoPoint).latitude;
+            order.pickupAddressLng = (data.pickup_address as GeoPoint).longitude;
+        }
+
+        return {
+            id: id,
+            order: order,
+            caller: {
+                id: data.caller_id,
+                photo: data.caller_photo,
+                firstname: data.caller_name
+            } as UserDetails,
+            expirationTime: data.expiration_time as number
+        } as Call;
+    }
+}
+
+export interface ResponseBody {
+    success: boolean,
+    message: string,
+    data?: any
 }
 
 export interface Call {
@@ -60,10 +104,12 @@ export interface Order {
     type: string,
     deliveryAddressLat: number,
     deliveryAddressLng: number,
+    deliveryAddressGeoHash: string,
     deliveryAddress: string,
     hasPickupAddress: boolean,
     pickupAddressLat?: number,
     pickupAddressLng?: number,
+    pickupAddressGeoHash?: string,
     pickupAddress?: string,
 }
 
@@ -88,4 +134,21 @@ export interface Bid {
 export interface CustomerDevice {
     customerId: string,
     deviceId: string
+}
+
+export interface CallsSearchCriteria {
+    loggedInCustomer: string,
+    centerPoint: GeoPoint,
+    radius: number
+}
+
+export interface GeohashRequest {
+    requestId: string,
+    geoPoint: GeoPoint,
+    radius: number
+}
+
+export interface GeohashResponse {
+    requestId: string,
+    geohashRanges: GeohashRange[]
 }

@@ -10,6 +10,8 @@ var Timestamp = firebase_admin_1.firestore.Timestamp;
 const gc_tasks_service_1 = require("./gc-tasks-service");
 const gc_messaging_service_1 = require("./gc-messaging-service");
 const models_1 = require("./models");
+const gc_geo_service_1 = require("./gc-geo-service");
+const geofire_common_1 = require("geofire-common");
 admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -83,7 +85,7 @@ exports.stripePayment = functions.https.onRequest(async (req, res) => {
             message = error.toString();
         }
         functions.logger.error("An error occurred!", { message: message });
-        res.status(401).send({ success: false, error: message });
+        res.status(401).send({ success: false, message: message });
     }
 });
 exports.onNodeExpired = functions.https.onRequest(async (req, res) => {
@@ -127,7 +129,7 @@ exports.onNodeExpired = functions.https.onRequest(async (req, res) => {
         // @ts-ignore
         const message = e.toString();
         functions.logger.error("Expiring node failed: ", { message: message });
-        res.status(401).send({ success: false, error: message });
+        res.status(401).send({ success: false, message: message });
     }
 });
 exports.onOrderCreated = functions.https.onRequest(async (req, res) => {
@@ -148,7 +150,7 @@ exports.onOrderCreated = functions.https.onRequest(async (req, res) => {
     }
 });
 exports.onCallCreated = functions.https.onRequest(async (req, res) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     const projectId = (_a = admin.instanceId().app.options.projectId) !== null && _a !== void 0 ? _a : 'unknown';
     const fireNodeExpirationFunc = (_b = process.env.FIRE_NODE_EXPIRATION_FUNC) !== null && _b !== void 0 ? _b : '';
     const call = req.body;
@@ -158,8 +160,10 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
         await firestore.collection('live_calls').doc(call.id).set({
             delivery_address: new GeoPoint(order.deliveryAddressLat, order.deliveryAddressLng),
             delivery_address_full: order.deliveryAddress,
+            delivery_address_geo_hash: (0, geofire_common_1.geohashForLocation)([order.deliveryAddressLat, order.deliveryAddressLng]),
             pickup_address: order.hasPickupAddress ? new GeoPoint((_c = order.pickupAddressLat) !== null && _c !== void 0 ? _c : 0, (_d = order.pickupAddressLng) !== null && _d !== void 0 ? _d : 0) : null,
             pickup_address_full: (_e = order.pickupAddress) !== null && _e !== void 0 ? _e : '',
+            pickup_address_geo_hash: order.hasPickupAddress ? (0, geofire_common_1.geohashForLocation)([(_f = order.pickupAddressLat) !== null && _f !== void 0 ? _f : 0, (_g = order.pickupAddressLng) !== null && _g !== void 0 ? _g : 0]) : null,
             expiration_time: Timestamp.fromMillis(call.expirationTime),
             order_id: order.id,
             order_type: order.type,
@@ -306,6 +310,33 @@ exports.onBidUpdated = functions.https.onRequest(async (req, res) => {
                 .catch((e) => res.status(401).send({ success: false, message: e.toString() }));
         }
         res.status(200).send({ success: true, message: 'Bargain updated successfully' });
+    }
+});
+exports.searchCallsInArea = functions.https.onRequest(async (req, res) => {
+    const searchCriteria = req.body;
+    const geoService = new gc_geo_service_1.GcGeoService();
+    try {
+        const calls = await geoService.fetchCallsDeliverableInArea(searchCriteria);
+        res.status(200).send({ success: true, message: `Success!! Found ${calls.length} calls`, data: calls });
+    }
+    catch (e) {
+        functions.logger.error(e);
+        res.status(400).send({ success: false, message: `Bad Request. Operation failed`, data: [] });
+    }
+});
+exports.computeGeoHash = functions.https.onRequest(async (req, res) => {
+    const geohashRequests = req.body;
+    try {
+        const geohashResponses = geohashRequests.map((geohashRequest) => {
+            const point = geohashRequest.geoPoint;
+            const geos = (0, geofire_common_1.geohashQueryBounds)([point.latitude, point.longitude], geohashRequest.radius);
+            return { requestId: geohashRequest.requestId, geohashRanges: geos };
+        });
+        res.status(200).send({ success: true, message: 'GeoHashRanges retrieved successfully', data: geohashResponses });
+    }
+    catch (e) {
+        functions.logger.error(e);
+        res.status(400).send({ success: false, message: 'Bad Request. Operation failed', data: [] });
     }
 });
 //# sourceMappingURL=index.js.map

@@ -9,7 +9,9 @@ import GeoPoint = firestore.GeoPoint;
 import Timestamp = firestore.Timestamp;
 import {GcTasksService} from "./gc-tasks-service";
 import {GcMessagingService} from "./gc-messaging-service";
-import {Bid, Call, Models} from "./models";
+import {Bid, Call, CallsSearchCriteria, GeohashRequest, GeohashResponse, Models, ResponseBody} from "./models";
+import {GcGeoService} from "./gc-geo-service";
+import {geohashForLocation, geohashQueryBounds, GeohashRange} from "geofire-common";
 
 
 admin.initializeApp(functions.config().firebase);
@@ -89,7 +91,7 @@ exports.stripePayment = functions.https.onRequest(async (req: Request, res: Resp
             message = error.toString();
         }
         functions.logger.error("An error occurred!", {message: message});
-        res.status(401).send({success: false, error: message});
+        res.status(401).send({success: false, message: message} as ResponseBody);
     }
 });
 
@@ -133,7 +135,7 @@ exports.onNodeExpired = functions.https.onRequest(async (req: Request, res: Resp
         // @ts-ignore
         const message = e.toString();
         functions.logger.error("Expiring node failed: ", {message: message});
-        res.status(401).send({success: false, error: message});
+        res.status(401).send({success: false, message: message} as ResponseBody);
     }
 });
 
@@ -145,11 +147,11 @@ exports.onOrderCreated = functions.https.onRequest(async (req: Request, res: Res
         const payload = Buffer.from(JSON.stringify({'uuid': orderId, 'type': 'order'})).toString('base64');
         const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime);
         functions.logger.info(`Task ${taskName} created successfully for order: ${orderId}`);
-        res.status(201).send({success: true, message: 'Order task created successfully'});
+        res.status(201).send({success: true, message: 'Order task created successfully'} as ResponseBody);
     } catch (e) {
         functions.logger.error('Creating task failed: ', e);
         // @ts-ignore
-        res.status(404).send({success: false, message: `Creating order task failed: ${e.toString()}`});
+        res.status(404).send({success: false, message: `Creating order task failed: ${e.toString()}`} as ResponseBody);
     }
 });
 
@@ -163,8 +165,10 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
         await firestore.collection('live_calls').doc(call.id).set({
             delivery_address: new GeoPoint(order.deliveryAddressLat, order.deliveryAddressLng),
             delivery_address_full: order.deliveryAddress,
+            delivery_address_geo_hash: geohashForLocation([order.deliveryAddressLat, order.deliveryAddressLng]),
             pickup_address: order.hasPickupAddress ? new GeoPoint(order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0) : null,
             pickup_address_full: order.pickupAddress ?? '',
+            pickup_address_geo_hash: order.hasPickupAddress ? geohashForLocation([order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0]) : null,
             expiration_time: Timestamp.fromMillis(call.expirationTime),
             order_id: order.id,
             order_type: order.type,
@@ -179,16 +183,16 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
             const payload = Buffer.from(JSON.stringify({'uuid': call.id, 'type': 'call'})).toString('base64');
             const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, call.expirationTime);
             functions.logger.info(`Task ${taskName} created successfully for call: ${call.id}`);
-            res.status(201).send({success: true, message: 'Call created successfully'});
+            res.status(201).send({success: true, message: 'Call created successfully'} as ResponseBody);
         } catch (e) {
             functions.logger.error('Creating task failed: ', e);
             // @ts-ignore
-            res.status(404).send({success: false, message: `Creating call task failed: ${e.toString()}`});
+            res.status(404).send({success: false, message: `Creating call task failed: ${e.toString()}`} as ResponseBody);
         }
     } catch (e) {
         functions.logger.error(`Live Call ${call.id} creation failed: `, e);
         // @ts-ignore
-        res.status(404).send({success: false, message: e.toString()});
+        res.status(404).send({success: false, message: e.toString()} as ResponseBody);
     }
 });
 
@@ -226,11 +230,11 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
                 body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
             } as Notification,
             data);
-        res.status(201).send({success: true, message: 'Bid created successfully'});
+        res.status(201).send({success: true, message: 'Bid created successfully'} as ResponseBody);
     } catch (e) {
         functions.logger.error(`Bid ${bid.id} creation failed`, e);
         // @ts-ignore
-        res.status(404).send({success: false, message: e.toString()});
+        res.status(404).send({success: false, message: e.toString()} as ResponseBody);
     }
 });
 
@@ -254,11 +258,11 @@ exports.onBargainPlaced = functions.https.onRequest(async (req: Request, res: Re
             // @ts-ignore
             functions.logger.info(`Bargain of ${bargainData.bargain_reply_amount} Euro placed on Bid ${bid.id}`);
         }
-        res.status(201).send({success: true, message: 'Bargain placed successfully'});
+        res.status(201).send({success: true, message: 'Bargain placed successfully'} as ResponseBody);
     } catch (e) {
         functions.logger.error(`Bargain placement on Bid ${bidId} failed`);
         // @ts-ignore
-        res.status(401).send({success: false, message: e.toString()});
+        res.status(401).send({success: false, message: e.toString()} as ResponseBody);
     }
 
 });
@@ -286,7 +290,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
                 new Map<string, string>()
             )
                 .then(() => bidDocRef.delete())
-                .catch((e) => res.status(401).send({success: false, message: e.toString()}));
+                .catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody));
         }
 
         if (bidStatus == 'accepted') {
@@ -300,7 +304,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
                         body: `Your bid of ${bidModel.bargainAmount} has been accepted.`
                     } as Notification,
                     new Map<string, string>()
-                ).catch((e) => res.status(401).send({success: false, message: e.toString()})));
+                ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
         }
 
         if (bidStatus == 'confirmed') {
@@ -316,7 +320,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
                     new Map<string, string>([
                         ['call_id', bidModel.callId]
                     ])
-                ).catch((e) => res.status(401).send({success: false, message: e.toString()})));
+                ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
         }
 
         if (bidStatus == 'renounced') {
@@ -334,6 +338,33 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
                 .then(() => bidDocRef.delete())
                 .catch((e) => res.status(401).send({success: false, message: e.toString()}));
         }
-        res.status(200).send({success: true, message: 'Bargain updated successfully'});
+        res.status(200).send({success: true, message: 'Bargain updated successfully'} as ResponseBody);
+    }
+});
+
+exports.searchCallsInArea = functions.https.onRequest(async (req: Request, res: Response) => {
+    const searchCriteria = req.body as CallsSearchCriteria;
+    const geoService = new GcGeoService();
+    try {
+        const calls: Call[] = await geoService.fetchCallsDeliverableInArea(searchCriteria);
+        res.status(200).send({success: true, message: `Success!! Found ${calls.length} calls`, data: calls});
+    } catch (e) {
+        functions.logger.error(e);
+        res.status(400).send({success: false, message: `Bad Request. Operation failed`, data: []} as ResponseBody);
+    }
+});
+
+exports.computeGeoHash = functions.https.onRequest(async (req: Request, res: Response) => {
+    const geohashRequests = req.body as GeohashRequest[];
+    try {
+        const geohashResponses: GeohashResponse[] = geohashRequests.map((geohashRequest) => {
+            const point: GeoPoint = geohashRequest.geoPoint;
+            const geos: GeohashRange[] = geohashQueryBounds([point.latitude, point.longitude], geohashRequest.radius);
+            return {requestId: geohashRequest.requestId, geohashRanges: geos} as GeohashResponse;
+        });
+        res.status(200).send({success: true, message: 'GeoHashRanges retrieved successfully', data: geohashResponses} as ResponseBody);
+    } catch (e) {
+        functions.logger.error(e);
+        res.status(400).send({success: false, message: 'Bad Request. Operation failed', data: []} as ResponseBody);
     }
 });
