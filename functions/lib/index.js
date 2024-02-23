@@ -9,9 +9,10 @@ var GeoPoint = firebase_admin_1.firestore.GeoPoint;
 var Timestamp = firebase_admin_1.firestore.Timestamp;
 const gc_tasks_service_1 = require("./gc-tasks-service");
 const gc_messaging_service_1 = require("./gc-messaging-service");
-const models_1 = require("./models");
 const gc_geo_service_1 = require("./gc-geo-service");
 const geofire_common_1 = require("geofire-common");
+// eslint-disable-next-line import/namespace
+const models_1 = require("./models");
 admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -169,7 +170,7 @@ exports.onCallCreated = functions.https.onRequest(async (req, res) => {
             order_type: order.type,
             caller_id: call.caller.id,
             caller_photo: call.caller.photo,
-            caller_name: call.caller.firstname
+            caller_name: call.caller.lastname
         });
         functions.logger.info(`Live Call ${call.id} created successfully`);
         /** Create GC task **/
@@ -202,10 +203,10 @@ exports.onBidCreated = functions.https.onRequest(async (req, res) => {
             call_id: bid.callId,
             call_amount: bid.proposedAmount,
             caller_id: bid.caller.id,
-            caller_name: bid.caller.firstname,
+            caller_name: bid.caller.lastname,
             caller_photo: bid.caller.photo,
             bidder_id: bid.bidder.id,
-            bidder_name: bid.bidder.firstname,
+            bidder_name: bid.bidder.lastname,
             bidder_photo: bid.bidder.photo,
             call_can_bargain: bid.callCanBargain,
             bargain_amount: bid.bargainAmount,
@@ -325,14 +326,17 @@ exports.searchCallsInArea = functions.https.onRequest(async (req, res) => {
     }
 });
 exports.computeGeoHash = functions.https.onRequest(async (req, res) => {
-    const geohashRequests = req.body;
+    const callsSearchRequest = req.body;
     try {
-        const geohashResponses = geohashRequests.map((geohashRequest) => {
-            const point = geohashRequest.geoPoint;
-            const geos = (0, geofire_common_1.geohashQueryBounds)([point.latitude, point.longitude], geohashRequest.radius);
-            return { requestId: geohashRequest.requestId, geohashRanges: geos };
-        });
-        res.status(200).send({ success: true, message: 'GeoHashRanges retrieved successfully', data: geohashResponses });
+        const deliveryGeoPoint = callsSearchRequest.deliveryAddressGeoRequest.geoPoint;
+        const deliveryGeo = (0, geofire_common_1.geohashQueryBounds)([deliveryGeoPoint.latitude, deliveryGeoPoint.longitude], callsSearchRequest.deliveryAddressGeoRequest.radius);
+        const searchResponse = { deliveryAddressGeoResponse: { geohashRanges: deliveryGeo } };
+        if (callsSearchRequest.pickupAddressGeoRequest !== undefined) {
+            const pickupGeoPoint = callsSearchRequest.pickupAddressGeoRequest.geoPoint;
+            const pickupGeo = (0, geofire_common_1.geohashQueryBounds)([pickupGeoPoint.latitude, pickupGeoPoint.longitude], callsSearchRequest.pickupAddressGeoRequest.radius);
+            searchResponse.pickupAddressGeoResponse = { geohashRanges: pickupGeo };
+        }
+        res.status(200).send({ success: true, message: 'GeoHashRanges retrieved successfully', data: searchResponse });
     }
     catch (e) {
         functions.logger.error(e);

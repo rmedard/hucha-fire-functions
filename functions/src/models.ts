@@ -20,12 +20,12 @@ export class Models {
             callId: data.call_id,
             caller: {
                 id: data.caller_id,
-                firstname: data.caller_name,
+                lastname: data.caller_name,
                 photo: data.caller_photo
             } as UserDetails,
             bidder: {
                 id: data.bidder_id,
-                firstname: data.bidder_name,
+                lastname: data.bidder_name,
                 photo: data.bidder_photo
             } as UserDetails,
             bargainAmount: data.bargain_amount as number,
@@ -79,7 +79,7 @@ export class Models {
             caller: {
                 id: data.caller_id,
                 photo: data.caller_photo,
-                firstname: data.caller_name
+                lastname: data.caller_name
             } as UserDetails,
             expirationTime: data.expiration_time as number
         } as Call;
@@ -116,7 +116,7 @@ export interface Order {
 export interface UserDetails {
     id: string,
     photo: string,
-    firstname: string
+    lastname: string
 }
 
 export interface Bid {
@@ -142,13 +142,21 @@ export interface CallsSearchCriteria {
     radius: number
 }
 
+export interface GeohashCallsSearchRequest {
+    deliveryAddressGeoRequest: GeohashRequest,
+    pickupAddressGeoRequest?: GeohashRequest
+}
+
+export interface GeohashCallsSearchResponse {
+    deliveryAddressGeoResponse: GeohashResponse,
+    pickupAddressGeoResponse?: GeohashResponse
+}
+
 export interface GeohashRequest {
-    requestId: string,
     geoPoint: GeoPoint,
     radius: number
 }
 
 export interface GeohashResponse {
-    requestId: string,
     geohashRanges: GeohashRange[]
 }

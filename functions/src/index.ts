@@ -9,9 +9,11 @@ import GeoPoint = firestore.GeoPoint;
 import Timestamp = firestore.Timestamp;
 import {GcTasksService} from "./gc-tasks-service";
 import {GcMessagingService} from "./gc-messaging-service";
-import {Bid, Call, CallsSearchCriteria, GeohashRequest, GeohashResponse, Models, ResponseBody} from "./models";
+
 import {GcGeoService} from "./gc-geo-service";
-import {geohashForLocation, geohashQueryBounds, GeohashRange} from "geofire-common";
+import {geohashForLocation, geohashQueryBounds} from "geofire-common";
+// eslint-disable-next-line import/namespace
+import {Bid, Call, CallsSearchCriteria, GeohashCallsSearchRequest, GeohashCallsSearchResponse, GeohashResponse, Models, ResponseBody} from "./models";
 
 
 admin.initializeApp(functions.config().firebase);
@@ -174,7 +176,7 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
             order_type: order.type,
             caller_id: call.caller.id,
             caller_photo: call.caller.photo,
-            caller_name: call.caller.firstname
+            caller_name: call.caller.lastname
         });
         functions.logger.info(`Live Call ${call.id} created successfully`);
 
@@ -206,10 +208,10 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
             call_id: bid.callId,
             call_amount: bid.proposedAmount,
             caller_id: bid.caller.id,
-            caller_name: bid.caller.firstname,
+            caller_name: bid.caller.lastname,
             caller_photo: bid.caller.photo,
             bidder_id: bid.bidder.id,
-            bidder_name: bid.bidder.firstname,
+            bidder_name: bid.bidder.lastname,
             bidder_photo: bid.bidder.photo,
             call_can_bargain: bid.callCanBargain,
             bargain_amount: bid.bargainAmount,
@@ -355,14 +357,17 @@ exports.searchCallsInArea = functions.https.onRequest(async (req: Request, res: 
 });
 
 exports.computeGeoHash = functions.https.onRequest(async (req: Request, res: Response) => {
-    const geohashRequests = req.body as GeohashRequest[];
+    const callsSearchRequest = req.body as GeohashCallsSearchRequest;
     try {
-        const geohashResponses: GeohashResponse[] = geohashRequests.map((geohashRequest) => {
-            const point: GeoPoint = geohashRequest.geoPoint;
-            const geos: GeohashRange[] = geohashQueryBounds([point.latitude, point.longitude], geohashRequest.radius);
-            return {requestId: geohashRequest.requestId, geohashRanges: geos} as GeohashResponse;
-        });
-        res.status(200).send({success: true, message: 'GeoHashRanges retrieved successfully', data: geohashResponses} as ResponseBody);
+        const deliveryGeoPoint: GeoPoint = callsSearchRequest.deliveryAddressGeoRequest.geoPoint;
+        const deliveryGeo = geohashQueryBounds([deliveryGeoPoint.latitude, deliveryGeoPoint.longitude], callsSearchRequest.deliveryAddressGeoRequest.radius);
+        const searchResponse: GeohashCallsSearchResponse = {deliveryAddressGeoResponse: {geohashRanges: deliveryGeo} as GeohashResponse};
+        if (callsSearchRequest.pickupAddressGeoRequest !== undefined) {
+            const pickupGeoPoint: GeoPoint = callsSearchRequest.pickupAddressGeoRequest.geoPoint;
+            const pickupGeo = geohashQueryBounds([pickupGeoPoint.latitude, pickupGeoPoint.longitude], callsSearchRequest.pickupAddressGeoRequest.radius);
+            searchResponse.pickupAddressGeoResponse = {geohashRanges: pickupGeo} as GeohashResponse;
+        }
+        res.status(200).send({success: true, message: 'GeoHashRanges retrieved successfully', data: searchResponse} as ResponseBody);
     } catch (e) {
         functions.logger.error(e);
         res.status(400).send({success: false, message: 'Bad Request. Operation failed', data: []} as ResponseBody);
