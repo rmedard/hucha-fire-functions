@@ -8,7 +8,7 @@ import View = google.cloud.tasks.v2.Task.View;
 import HttpMethod = google.cloud.tasks.v2.HttpMethod;
 import IHttpRequest = google.cloud.tasks.v2.IHttpRequest;
 import ICreateTaskRequest = google.cloud.tasks.v2.ICreateTaskRequest;
-import {CloudTasksClient} from '@google-cloud/tasks/build/cjs/src/v2';
+import {CloudTasksClient} from "@google-cloud/tasks";
 
 /**
  * Google Cloud Tasks Service

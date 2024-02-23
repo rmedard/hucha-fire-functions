@@ -27,7 +27,7 @@ admin.initializeApp(functions.config().firebase);
 
 exports.stripePayment = functions.https.onRequest(async (req: Request, res: Response) => {
     const secretKey = functions.config().stripe.testkey;
-    const apiVersionDate = '2023-08-16';
+    const apiVersionDate = '2023-10-16';
 
     const stripe = new Stripe(secretKey, {
         apiVersion: apiVersionDate, typescript: true
