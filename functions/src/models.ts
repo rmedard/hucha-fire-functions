@@ -89,7 +89,7 @@ export class Models {
 export interface ResponseBody {
     success: boolean,
     message: string,
-    data?: any
+    data?: object
 }
 
 export interface Call {

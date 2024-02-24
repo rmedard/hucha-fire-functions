@@ -1,4 +1,6 @@
 import * as functions from "firebase-functions";
+import {onRequest} from "firebase-functions/v2/https";
+
 import {Request, Response} from "firebase-functions";
 import Stripe from 'stripe';
 import * as admin from 'firebase-admin';
@@ -16,7 +18,7 @@ import {geohashForLocation, geohashQueryBounds} from "geofire-common";
 import {Bid, Call, CallsSearchCriteria, GeohashCallsSearchRequest, GeohashCallsSearchResponse, GeohashResponse, Models, ResponseBody} from "./models";
 
 
-admin.initializeApp(functions.config().firebase);
+// admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
 //
@@ -25,8 +27,8 @@ admin.initializeApp(functions.config().firebase);
 //   response.send("Hello from Firebase!");
 // });
 
-exports.stripePayment = functions.https.onRequest(async (req: Request, res: Response) => {
-    const secretKey = functions.config().stripe.testkey;
+exports.stripePayment = onRequest(async (req: Request, res: Response) => {
+    const secretKey = process.env.STRIPE_TESTKEY as string;
     const apiVersionDate = '2023-10-16';
 
     const stripe = new Stripe(secretKey, {
@@ -97,42 +99,43 @@ exports.stripePayment = functions.https.onRequest(async (req: Request, res: Resp
     }
 });
 
-exports.onNodeExpired = functions.https.onRequest(async (req: Request, res: Response) => {
-    const nodeUuid = req.body.uuid;
+exports.onCallExpired = onRequest(async (req: Request, res: Response) => {
     const nodeType = req.body.type;
+    if (nodeType !== 'call') {
+        res.status(401).send({success: false, message: 'Node expiration: Type not allowed'} as ResponseBody);
+    }
+    const nodeUuid = req.body.uuid;
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const huchaToken = process.env.HUCHA_TOKEN;
     const huchaHost = process.env.HUCHA_HOST;
     const backendUrl = `${huchaHost}/expire-node/${huchaToken}`;
-    const payload = {'uuid': nodeUuid, 'type': nodeType};
+    const backedPayload = {'uuid': nodeUuid, 'type': nodeType};
 
     const firestore = new Firestore({projectId: projectId});
     try {
-        if (nodeType == 'call') {
-            /** Delete live call and related bids **/
-            const callReference = firestore.collection('live_calls').doc(nodeUuid);
-            await firestore.collection('live_bids')
-                .where('call_id', '==', nodeUuid)
-                .get()
-                .then((bids) => bids.forEach((bid) => bid.ref.delete()));
-            await callReference.delete();
-        }
+        /** Delete live call and related bids **/
+        const callReference = firestore.collection('live_calls').doc(nodeUuid);
+        await firestore.collection('live_bids')
+            .where('call_id', '==', nodeUuid)
+            .get()
+            .then((bids) => bids.forEach((bid) => bid.ref.delete()));
+        await callReference.delete();
+
         /** Expire node in backend **/
             // eslint-disable-next-line @typescript-eslint/no-var-requires
         const fetch = require('node-fetch');
-        functions.logger.info(`Calling backend to expire node ${payload.uuid}`);
-        // @ts-ignore
+        functions.logger.info(`Calling backend to expire node. Type: ${backedPayload.type} | Uuid: ${backedPayload.uuid}`);
         fetch(backendUrl, {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(backedPayload)
         })
-            .then((res: any) => res.text())
+            .then((res: Response) => res.json())
             .then((text: string) => functions.logger.info(`Node ${nodeUuid} of type ${nodeType} expired successfully. Message: ${text}`))
-            .catch((err: any) => functions.logger.error(err));
+            .catch((err: never) => functions.logger.error(err));
     } catch (e) {
         // @ts-ignore
         const message = e.toString();
@@ -141,23 +144,7 @@ exports.onNodeExpired = functions.https.onRequest(async (req: Request, res: Resp
     }
 });
 
-exports.onOrderCreated = functions.https.onRequest(async (req: Request, res: Response) => {
-    const fireNodeExpirationFunc = process.env.FIRE_NODE_EXPIRATION_FUNC ?? '';
-    const orderId = req.body.orderUuid;
-    /** Create GC task **/
-    try {
-        const payload = Buffer.from(JSON.stringify({'uuid': orderId, 'type': 'order'})).toString('base64');
-        const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, req.body.orderExpirationTime);
-        functions.logger.info(`Task ${taskName} created successfully for order: ${orderId}`);
-        res.status(201).send({success: true, message: 'Order task created successfully'} as ResponseBody);
-    } catch (e) {
-        functions.logger.error('Creating task failed: ', e);
-        // @ts-ignore
-        res.status(404).send({success: false, message: `Creating order task failed: ${e.toString()}`} as ResponseBody);
-    }
-});
-
-exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.onCallCreated = onRequest(async (req: Request, res: Response) => {
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const fireNodeExpirationFunc = process.env.FIRE_NODE_EXPIRATION_FUNC ?? '';
     const call = req.body as Call;
@@ -198,7 +185,7 @@ exports.onCallCreated = functions.https.onRequest(async (req: Request, res: Resp
     }
 });
 
-exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
     const bid = req.body as Bid;
     try {
         const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
@@ -240,7 +227,7 @@ exports.onBidCreated = functions.https.onRequest(async (req: Request, res: Respo
     }
 });
 
-exports.onBargainPlaced = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.onBargainPlaced = onRequest(async (req: Request, res: Response) => {
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const bidId = req.body.id;
     const isExecutorBargain = req.body.isExecutorBargain;
@@ -269,7 +256,7 @@ exports.onBargainPlaced = functions.https.onRequest(async (req: Request, res: Re
 
 });
 
-exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const bidId = req.body.id;
     const bidStatus = req.body.status;
@@ -344,7 +331,7 @@ exports.onBidUpdated = functions.https.onRequest(async (req: Request, res: Respo
     }
 });
 
-exports.searchCallsInArea = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.searchCallsInArea = onRequest(async (req: Request, res: Response) => {
     const searchCriteria = req.body as CallsSearchCriteria;
     const geoService = new GcGeoService();
     try {
@@ -356,7 +343,7 @@ exports.searchCallsInArea = functions.https.onRequest(async (req: Request, res: 
     }
 });
 
-exports.computeGeoHash = functions.https.onRequest(async (req: Request, res: Response) => {
+exports.computeGeoHash = onRequest(async (req: Request, res: Response) => {
     const callsSearchRequest = req.body as GeohashCallsSearchRequest;
     try {
         const deliveryGeoPoint: GeoPoint = callsSearchRequest.deliveryAddressGeoRequest.geoPoint;
