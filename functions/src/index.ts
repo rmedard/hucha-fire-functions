@@ -16,8 +16,9 @@ import {GcGeoService} from "./gc-geo-service";
 import {geohashForLocation, geohashQueryBounds} from "geofire-common";
 // eslint-disable-next-line import/namespace
 import {Bid, Call, CallsSearchCriteria, GeohashCallsSearchRequest, GeohashCallsSearchResponse, GeohashResponse, Models, ResponseBody} from "./models";
+import SetOptions = firestore.SetOptions;
 
-
+admin.initializeApp();
 // admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -160,10 +161,12 @@ exports.onCallCreated = onRequest(async (req: Request, res: Response) => {
             pickup_address_geo_hash: order.hasPickupAddress ? geohashForLocation([order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0]) : null,
             expiration_time: Timestamp.fromMillis(call.expirationTime),
             order_id: order.id,
+            status: call.status,
             order_type: order.type,
             caller_id: call.caller.id,
             caller_photo: call.caller.photo,
-            caller_name: call.caller.lastname
+            caller_name: call.caller.lastname,
+            shopping_cost: order.shoppingCost
         });
         functions.logger.info(`Live Call ${call.id} created successfully`);
 
@@ -192,6 +195,7 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
         const firestore = new Firestore({projectId: projectId});
         await firestore.collection('live_bids').doc(bid.id).set({
             status: bid.status,
+            type: bid.type,
             call_id: bid.callId,
             call_amount: bid.proposedAmount,
             caller_id: bid.caller.id,
@@ -200,9 +204,7 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
             bidder_id: bid.bidder.id,
             bidder_name: bid.bidder.lastname,
             bidder_photo: bid.bidder.photo,
-            call_can_bargain: bid.callCanBargain,
             bargain_amount: bid.bargainAmount,
-            bargain_reply_amount: bid.bargainReplyAmount,
             created_at: Timestamp.now()
         });
         functions.logger.info(`Bid ${bid.id} created successfully`);
@@ -211,14 +213,29 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
         const data = new Map<string, string>([
             ['call_id', bid.callId]
         ]);
-        await messagingService.sendNotification(
-            bid.caller.id,
-            'newBid',
-            {
-                title: 'A new bid placed',
-                body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
-            } as Notification,
-            data);
+        switch (bid.type) {
+            case 'accept':
+                await firestore.collection('live_calls').doc(bid.callId).set({status: 'confirmed'}, {merge: true} as SetOptions);
+                await messagingService.sendNotification(
+                    bid.caller.id,
+                    'bidAccepted',
+                    {
+                        title: 'Delivery accepted',
+                        body: `A bid to accept your call has been placed now.`
+                    } as Notification,
+                    data);
+                break;
+            case 'bargain':
+                await messagingService.sendNotification(
+                    bid.caller.id,
+                    'newBid',
+                    {
+                        title: 'A new bid placed',
+                        body: `A new bid of ${bid.bargainAmount} Euro has been placed now.`
+                    } as Notification,
+                    data);
+                break;
+        }
         res.status(201).send({success: true, message: 'Bid created successfully'} as ResponseBody);
     } catch (e) {
         functions.logger.error(`Bid ${bid.id} creation failed`, e);
@@ -268,64 +285,63 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
     if (bidData !== undefined) {
         const bidModel = Models.toBid(bid.id, bidData);
         const messagingService = new GcMessagingService();
-        if (bidStatus == 'rejected') {
-            await messagingService.sendNotification(
-                bidModel.bidder.id,
-                'bidRejected',
-                {
-                    title: 'Your bid has been rejected',
-                    body: `Your bid of ${bidModel.bargainAmount} has been rejected.`
-                } as Notification,
-                new Map<string, string>()
-            )
-                .then(() => bidDocRef.delete())
-                .catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody));
-        }
-
-        if (bidStatus == 'accepted') {
-            bidDocRef
-                .update({'status': bidStatus})
-                .then(() => messagingService.sendNotification(
+        switch (bidStatus) {
+            case 'rejected':
+                await messagingService.sendNotification(
                     bidModel.bidder.id,
-                    'bidAccepted',
+                    'bidRejected',
                     {
-                        title: 'Your bid has been accepted',
-                        body: `Your bid of ${bidModel.bargainAmount} has been accepted.`
+                        title: 'Your bid has been rejected',
+                        body: `Your bid of ${bidModel.bargainAmount} has been rejected.`
                     } as Notification,
                     new Map<string, string>()
-                ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
-        }
-
-        if (bidStatus == 'confirmed') {
-            bidDocRef
-                .update({'status': bidStatus})
-                .then(() => messagingService.sendNotification(
+                )
+                    .then(() => bidDocRef.delete())
+                    .catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody));
+                break;
+            case 'accepted':
+                bidDocRef
+                    .update({'status': bidStatus})
+                    .then(() => messagingService.sendNotification(
+                        bidModel.bidder.id,
+                        'bidAccepted',
+                        {
+                            title: 'Your bid has been accepted',
+                            body: `Your bid of ${bidModel.bargainAmount} has been accepted.`
+                        } as Notification,
+                        new Map<string, string>()
+                    ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
+                break;
+            case 'confirmed':
+                bidDocRef
+                    .update({'status': bidStatus})
+                    .then(() => messagingService.sendNotification(
+                        bidModel.caller.id,
+                        'bidConfirmed',
+                        {
+                            title: 'Order delivery confirmed',
+                            body: `Your order delivery has been confirmed by the serviceman.`
+                        } as Notification,
+                        new Map<string, string>([
+                            ['call_id', bidModel.callId]
+                        ])
+                    ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
+                break;
+            case 'renounced':
+                await messagingService.sendNotification(
                     bidModel.caller.id,
-                    'bidConfirmed',
+                    'bidRenounced',
                     {
-                        title: 'Order delivery confirmed',
-                        body: `Your order delivery has been confirmed by the serviceman.`
+                        title: 'Order delivery renounced',
+                        body: `Sorry, your order delivery has been renounced.`
                     } as Notification,
                     new Map<string, string>([
                         ['call_id', bidModel.callId]
                     ])
-                ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
-        }
-
-        if (bidStatus == 'renounced') {
-            await messagingService.sendNotification(
-                bidModel.caller.id,
-                'bidRenounced',
-                {
-                    title: 'Order delivery renounced',
-                    body: `Sorry, your order delivery has been renounced.`
-                } as Notification,
-                new Map<string, string>([
-                    ['call_id', bidModel.callId]
-                ])
-            )
-                .then(() => bidDocRef.delete())
-                .catch((e) => res.status(401).send({success: false, message: e.toString()}));
+                )
+                    .then(() => bidDocRef.delete())
+                    .catch((e) => res.status(401).send({success: false, message: e.toString()}));
+                break;
         }
         res.status(200).send({success: true, message: 'Bargain updated successfully'} as ResponseBody);
     }

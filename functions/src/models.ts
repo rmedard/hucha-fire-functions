@@ -17,6 +17,8 @@ export class Models {
     static toBid(id: string, data: DocumentData): Bid {
         return {
             id: id,
+            status: data.status,
+            type: data.type,
             callId: data.call_id,
             caller: {
                 id: data.caller_id,
@@ -28,11 +30,8 @@ export class Models {
                 lastname: data.bidder_name,
                 photo: data.bidder_photo
             } as UserDetails,
-            bargainAmount: data.bargain_amount as number,
             proposedAmount: data.proposed_amount as number,
-            bargainReplyAmount: data.bargain_reply_amount as number,
-            callCanBargain: data.call_can_bargain as boolean,
-            status: data.status
+            bargainAmount: data.bargain_amount as number
         } as Bid;
     }
 
@@ -76,12 +75,15 @@ export class Models {
         return {
             id: id,
             order: order,
+            status: data.status,
             caller: {
                 id: data.caller_id,
                 photo: data.caller_photo,
                 lastname: data.caller_name
             } as UserDetails,
-            expirationTime: data.expiration_time as number
+            expirationTime: data.expiration_time as number,
+            proposedFee: data.proposed_fee,
+            canBargain: data.can_bargain
         } as Call;
     }
 }
@@ -94,9 +96,12 @@ export interface ResponseBody {
 
 export interface Call {
     id: string,
-    expirationTime: number
+    status: string,
+    expirationTime: number,
     order: Order,
-    caller: UserDetails
+    caller: UserDetails,
+    proposedFee: number,
+    canBargain: boolean
 }
 
 export interface Order {
@@ -111,6 +116,7 @@ export interface Order {
     pickupAddressLng?: number,
     pickupAddressGeoHash?: string,
     pickupAddress?: string,
+    shoppingCost: number
 }
 
 export interface UserDetails {
@@ -122,10 +128,10 @@ export interface UserDetails {
 export interface Bid {
     id: string,
     status: string,
+    type: string,
     callId: string,
     caller: UserDetails,
     bidder: UserDetails,
-    callCanBargain: boolean,
     proposedAmount: number,
     bargainAmount: number,
     bargainReplyAmount: number
