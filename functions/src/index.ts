@@ -153,6 +153,8 @@ exports.onCallCreated = onRequest(async (req: Request, res: Response) => {
         const firestore = new Firestore({projectId: projectId});
         const order = call.order;
         await firestore.collection('live_calls').doc(call.id).set({
+            order_number: order.orderNumber,
+            order_delivery_time: Timestamp.fromMillis(order.deliveryTime),
             delivery_address: new GeoPoint(order.deliveryAddressLat, order.deliveryAddressLng),
             delivery_address_full: order.deliveryAddress,
             delivery_address_geo_hash: geohashForLocation([order.deliveryAddressLat, order.deliveryAddressLng]),
@@ -166,7 +168,9 @@ exports.onCallCreated = onRequest(async (req: Request, res: Response) => {
             caller_id: call.caller.id,
             caller_photo: call.caller.photo,
             caller_name: call.caller.lastname,
-            shopping_cost: order.shoppingCost
+            proposed_fee: call.proposedFee,
+            shopping_cost: order.shoppingCost,
+            can_bargain: call.canBargain
         });
         functions.logger.info(`Live Call ${call.id} created successfully`);
 
@@ -197,7 +201,7 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
             status: bid.status,
             type: bid.type,
             call_id: bid.callId,
-            call_amount: bid.proposedAmount,
+            call_amount: bid.callAmount,
             caller_id: bid.caller.id,
             caller_name: bid.caller.lastname,
             caller_photo: bid.caller.photo,
@@ -301,7 +305,7 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
                 break;
             case 'accepted':
                 bidDocRef
-                    .update({'status': bidStatus})
+                    .set({status: bidStatus}, {merge: true} as SetOptions)
                     .then(() => messagingService.sendNotification(
                         bidModel.bidder.id,
                         'bidAccepted',
@@ -313,8 +317,17 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
                     ).catch((e) => res.status(401).send({success: false, message: e.toString()} as ResponseBody)));
                 break;
             case 'confirmed':
-                bidDocRef
-                    .update({'status': bidStatus})
+                bidDocRef.set({status: bidStatus}, {merge: true} as SetOptions);
+                firestore
+                    .collection('live_calls')
+                    .doc(bidModel.callId)
+                    .set({
+                        status: 'attributed',
+                        executor_id: bidModel.bidder.id,
+                        executor_photo: bidModel.bidder.photo,
+                        executor_name: bidModel.bidder.lastname,
+                        proposed_fee: bidModel.bargainAmount > bidModel.callAmount ? bidModel.bargainAmount : bidModel.callAmount
+                    }, {merge: true} as SetOptions)
                     .then(() => messagingService.sendNotification(
                         bidModel.caller.id,
                         'bidConfirmed',

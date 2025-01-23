@@ -30,7 +30,7 @@ export class Models {
                 lastname: data.bidder_name,
                 photo: data.bidder_photo
             } as UserDetails,
-            proposedAmount: data.proposed_amount as number,
+            callAmount: data.call_amount as number,
             bargainAmount: data.bargain_amount as number
         } as Bid;
     }
@@ -81,6 +81,11 @@ export class Models {
                 photo: data.caller_photo,
                 lastname: data.caller_name
             } as UserDetails,
+            executor: data.executor_id ?? {
+                id: data.executor_id,
+                photo: data.executor_photo,
+                lastname: data.executor_name
+            } as UserDetails,
             expirationTime: data.expiration_time as number,
             proposedFee: data.proposed_fee,
             canBargain: data.can_bargain
@@ -100,6 +105,7 @@ export interface Call {
     expirationTime: number,
     order: Order,
     caller: UserDetails,
+    executor?: UserDetails,
     proposedFee: number,
     canBargain: boolean
 }
@@ -107,6 +113,8 @@ export interface Call {
 export interface Order {
     id: string,
     type: string,
+    orderNumber: string,
+    deliveryTime: number,
     deliveryAddressLat: number,
     deliveryAddressLng: number,
     deliveryAddressGeoHash: string,
@@ -132,7 +140,7 @@ export interface Bid {
     callId: string,
     caller: UserDetails,
     bidder: UserDetails,
-    proposedAmount: number,
+    callAmount: number,
     bargainAmount: number,
     bargainReplyAmount: number
 }
