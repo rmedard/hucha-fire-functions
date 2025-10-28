@@ -1,7 +1,7 @@
-import {Call, CallsSearchCriteria, Models} from "./models";
-import {geohashQueryBounds, GeohashRange} from "geofire-common";
-import {firestore} from "firebase-admin";
-import * as admin from "firebase-admin";
+import {Call, CallsSearchCriteria, Models} from './models';
+import {geohashQueryBounds, GeohashRange} from 'geofire-common';
+import {firestore} from 'firebase-admin';
+import * as admin from 'firebase-admin';
 import Firestore = firestore.Firestore;
 
 /**

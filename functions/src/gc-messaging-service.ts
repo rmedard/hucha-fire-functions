@@ -1,8 +1,8 @@
-import {firestore, messaging} from "firebase-admin";
+import {firestore, messaging} from 'firebase-admin';
 import Notification = messaging.Notification;
-import * as admin from "firebase-admin";
-import * as functions from "firebase-functions";
-import {AndroidConfig, AndroidNotification, TokenMessage} from "firebase-admin/lib/messaging";
+import * as admin from 'firebase-admin';
+import * as functions from 'firebase-functions';
+import {AndroidConfig, AndroidNotification, TokenMessage} from 'firebase-admin/lib/messaging';
 import DocumentData = firestore.DocumentData;
 import Firestore = firestore.Firestore;
 import Timestamp = firestore.Timestamp;
@@ -52,12 +52,12 @@ export class GcMessagingService {
         await firestore
             .collection('notifications')
             .add({
-                'type': notificationType,
-                'title': notification.title,
-                'body': notification.body,
-                'target_customer': targetCustomerId,
-                'created_at': Timestamp.now(),
-                'metadata': Object.fromEntries(data.entries())
+                type: notificationType,
+                title: notification.title,
+                body: notification.body,
+                target_customer: targetCustomerId,
+                created_at: Timestamp.now(),
+                metadata: Object.fromEntries(data.entries())
             });
     }
 }

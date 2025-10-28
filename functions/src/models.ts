@@ -1,7 +1,7 @@
-import {firestore} from "firebase-admin";
+import {firestore} from 'firebase-admin';
 import DocumentData = firestore.DocumentData;
 import GeoPoint = firestore.GeoPoint;
-import {GeohashRange} from "geofire-common";
+import {GeohashRange} from 'geofire-common';
 
 /**
  *

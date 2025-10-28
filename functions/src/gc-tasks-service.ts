@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import {firestore} from 'firebase-admin';
 import Timestamp = firestore.Timestamp;
-import {CloudTasksClient} from "@google-cloud/tasks";
+import {CloudTasksClient} from '@google-cloud/tasks';
 
 /**
  * Google Cloud Tasks Service

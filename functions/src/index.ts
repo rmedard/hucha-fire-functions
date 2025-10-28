@@ -1,7 +1,6 @@
-import * as functions from "firebase-functions";
-import {onRequest} from "firebase-functions/v2/https";
+import * as functions from 'firebase-functions';
+import {onRequest, Request} from 'firebase-functions/v2/https';
 
-import {Request, Response} from "firebase-functions";
 import Stripe from 'stripe';
 import * as admin from 'firebase-admin';
 import {firestore} from 'firebase-admin';
@@ -9,16 +8,21 @@ import {firestore} from 'firebase-admin';
 import Firestore = firestore.Firestore;
 import GeoPoint = firestore.GeoPoint;
 import Timestamp = firestore.Timestamp;
-import {GcTasksService} from "./gc-tasks-service";
-import {GcMessagingService} from "./gc-messaging-service";
+import {GcMessagingService} from './gc-messaging-service';
 
-import {GcGeoService} from "./gc-geo-service";
-import {geohashForLocation, geohashQueryBounds} from "geofire-common";
-// eslint-disable-next-line import/namespace
-import {Bid, Call, CallsSearchCriteria, GeohashCallsSearchRequest, GeohashCallsSearchResponse, GeohashResponse, Models, ResponseBody} from "./models";
+import {GcGeoService} from './gc-geo-service';
+import {geohashQueryBounds, Geopoint} from 'geofire-common';
+import {Bid, Call, CallsSearchCriteria, GeohashCallsSearchRequest, GeohashCallsSearchResponse, GeohashResponse, Models, ResponseBody} from './models';
 import SetOptions = firestore.SetOptions;
+import {onObjectDeleted, onObjectFinalized} from 'firebase-functions/v2/storage';
+import FieldValue = firestore.FieldValue;
+import {getFirestore} from 'firebase-admin/firestore';
+import {getStorage} from 'firebase-admin/storage';
+import {onDocumentCreated} from 'firebase-functions/v2/firestore';
 
 admin.initializeApp();
+const db = getFirestore();
+const storage = getStorage();
 // admin.initializeApp(functions.config().firebase);
 // // Start writing Firebase Functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -28,9 +32,11 @@ admin.initializeApp();
 //   response.send("Hello from Firebase!");
 // });
 
-exports.stripePayment = onRequest(async (req: Request, res: Response) => {
+const BUCKET_NAME = 'dinger-cash-344019.appspot.com';
+
+exports.stripePayment = onRequest(async (req: Request, res) => {
     const secretKey = process.env.STRIPE_TESTKEY as string;
-    const apiVersionDate = '2023-10-16';
+    const apiVersionDate = '2025-09-30.clover';
 
     const stripe = new Stripe(secretKey, {
         apiVersion: apiVersionDate, typescript: true
@@ -49,20 +55,17 @@ exports.stripePayment = onRequest(async (req: Request, res: Response) => {
                 const updateParams = {} as Stripe.CustomerUpdateParams;
                 updateParams.name = req.body.names;
                 updateParams.metadata = {
-                    'business_id': req.body.business_id
+                    business_id: req.body.business_id
                 };
                 customer = await stripe.customers.update(customer.id, updateParams);
             }
             customerId = customer.id;
         } else {
             const customer = await stripe.customers.create({
-                    name: req.body.names,
-                    email: req.body.email,
-                    metadata: {
-                        'business_id': req.body.business_id
-                    }
-                }
-            );
+                name: req.body.names,
+                email: req.body.email,
+                metadata: {business_id: req.body.business_id}
+            });
             customerId = customer.id;
         }
 
@@ -73,7 +76,7 @@ exports.stripePayment = onRequest(async (req: Request, res: Response) => {
                     currency: req.body.currency,
                     customer: customerId,
                     metadata: {
-                        'customer_business_id': req.body.business_id
+                        customer_business_id: req.body.business_id
                     }
                 }).then((intent) => {
                     res.json({
@@ -95,12 +98,12 @@ exports.stripePayment = onRequest(async (req: Request, res: Response) => {
             // @ts-ignore
             message = error.toString();
         }
-        functions.logger.error("An error occurred!", {message: message});
+        functions.logger.error('An error occurred!', {message: message});
         res.status(401).send({success: false, message: message} as ResponseBody);
     }
 });
 
-exports.onCallExpired = onRequest(async (req: Request, res: Response) => {
+exports.onCallExpired = onRequest(async (req: Request, res) => {
     const nodeType = req.body.type;
     if (nodeType !== 'call') {
         res.status(401).send({success: false, message: 'Node expiration: Type not allowed'} as ResponseBody);
@@ -110,7 +113,7 @@ exports.onCallExpired = onRequest(async (req: Request, res: Response) => {
     const huchaToken = process.env.HUCHA_TOKEN;
     const huchaHost = process.env.HUCHA_HOST;
     const backendUrl = `${huchaHost}/expire-node/${huchaToken}`;
-    const backedPayload = {'uuid': nodeUuid, 'type': nodeType};
+    const backedPayload = {uuid: nodeUuid, type: nodeType};
 
     const firestore = new Firestore({projectId: projectId});
     try {
@@ -123,13 +126,13 @@ exports.onCallExpired = onRequest(async (req: Request, res: Response) => {
         await callReference.delete();
 
         /** Expire node in backend **/
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const fetch = require('node-fetch');
         functions.logger.info(`Calling backend to expire node. Type: ${backedPayload.type} | Uuid: ${backedPayload.uuid}`);
         fetch(backendUrl, {
             method: 'POST',
             headers: {
-                'Accept': 'application/json',
+                Accept: 'application/json',
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(backedPayload)
@@ -140,59 +143,12 @@ exports.onCallExpired = onRequest(async (req: Request, res: Response) => {
     } catch (e) {
         // @ts-ignore
         const message = e.toString();
-        functions.logger.error("Expiring node failed: ", {message: message});
+        functions.logger.error('Expiring node failed: ', {message: message});
         res.status(401).send({success: false, message: message} as ResponseBody);
     }
 });
 
-exports.onCallCreated = onRequest(async (req: Request, res: Response) => {
-    const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
-    const fireNodeExpirationFunc = process.env.FIRE_NODE_EXPIRATION_FUNC ?? '';
-    const call = req.body as Call;
-    try {
-        const firestore = new Firestore({projectId: projectId});
-        const order = call.order;
-        await firestore.collection('live_calls').doc(call.id).set({
-            order_number: order.orderNumber,
-            order_delivery_time: Timestamp.fromMillis(order.deliveryTime),
-            delivery_address: new GeoPoint(order.deliveryAddressLat, order.deliveryAddressLng),
-            delivery_address_full: order.deliveryAddress,
-            delivery_address_geo_hash: geohashForLocation([order.deliveryAddressLat, order.deliveryAddressLng]),
-            pickup_address: order.hasPickupAddress ? new GeoPoint(order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0) : null,
-            pickup_address_full: order.pickupAddress ?? '',
-            pickup_address_geo_hash: order.hasPickupAddress ? geohashForLocation([order.pickupAddressLat ?? 0, order.pickupAddressLng ?? 0]) : null,
-            expiration_time: Timestamp.fromMillis(call.expirationTime),
-            order_id: order.id,
-            status: call.status,
-            order_type: order.type,
-            caller_id: call.caller.id,
-            caller_photo: call.caller.photo,
-            caller_name: call.caller.lastname,
-            proposed_fee: call.proposedFee,
-            shopping_cost: order.shoppingCost,
-            can_bargain: call.canBargain
-        });
-        functions.logger.info(`Live Call ${call.id} created successfully`);
-
-        /** Create GC task **/
-        try {
-            const payload = Buffer.from(JSON.stringify({'uuid': call.id, 'type': 'call'})).toString('base64');
-            const taskName = await (new GcTasksService()).createGcTask(payload, fireNodeExpirationFunc, call.expirationTime);
-            functions.logger.info(`Task ${taskName} created successfully for call: ${call.id}`);
-            res.status(201).send({success: true, message: 'Call created successfully'} as ResponseBody);
-        } catch (e) {
-            functions.logger.error('Creating task failed: ', e);
-            // @ts-ignore
-            res.status(404).send({success: false, message: `Creating call task failed: ${e.toString()}`} as ResponseBody);
-        }
-    } catch (e) {
-        functions.logger.error(`Live Call ${call.id} creation failed: `, e);
-        // @ts-ignore
-        res.status(404).send({success: false, message: e.toString()} as ResponseBody);
-    }
-});
-
-exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
+exports.onBidCreated = onRequest(async (req: Request, res) => {
     const bid = req.body as Bid;
     try {
         const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
@@ -219,13 +175,13 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
         ]);
         switch (bid.type) {
             case 'accept':
-                await firestore.collection('live_calls').doc(bid.callId).set({status: 'confirmed'}, {merge: true} as SetOptions);
+                await firestore.collection('live_calls').doc(bid.callId).set({status: 'attributed'}, {merge: true} as SetOptions);
                 await messagingService.sendNotification(
                     bid.caller.id,
                     'bidAccepted',
                     {
                         title: 'Delivery accepted',
-                        body: `A bid to accept your call has been placed now.`
+                        body: 'A bid to accept your call has been placed now.'
                     } as Notification,
                     data);
                 break;
@@ -248,7 +204,7 @@ exports.onBidCreated = onRequest(async (req: Request, res: Response) => {
     }
 });
 
-exports.onBargainPlaced = onRequest(async (req: Request, res: Response) => {
+exports.onBargainPlaced = onRequest(async (req: Request, res) => {
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const bidId = req.body.id;
     const isExecutorBargain = req.body.isExecutorBargain;
@@ -266,7 +222,7 @@ exports.onBargainPlaced = onRequest(async (req: Request, res: Response) => {
             functions.logger.info(`Bargain of ${bargainData.bargain_amount} Euro placed on bid ${bidId}`);
         } else {
             // @ts-ignore
-            functions.logger.info(`Bargain of ${bargainData.bargain_reply_amount} Euro placed on Bid ${bid.id}`);
+            functions.logger.info(`Bargain of ${bargainData.bargain_reply_amount} Euro placed on Bid ${bidId}`);
         }
         res.status(201).send({success: true, message: 'Bargain placed successfully'} as ResponseBody);
     } catch (e) {
@@ -277,7 +233,7 @@ exports.onBargainPlaced = onRequest(async (req: Request, res: Response) => {
 
 });
 
-exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
+exports.onBidUpdated = onRequest(async (req: Request, res) => {
     const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
     const bidId = req.body.id;
     const bidStatus = req.body.status;
@@ -333,7 +289,7 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
                         'bidConfirmed',
                         {
                             title: 'Order delivery confirmed',
-                            body: `Your order delivery has been confirmed by the serviceman.`
+                            body: 'Your order delivery has been confirmed by the serviceman.'
                         } as Notification,
                         new Map<string, string>([
                             ['call_id', bidModel.callId]
@@ -346,7 +302,7 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
                     'bidRenounced',
                     {
                         title: 'Order delivery renounced',
-                        body: `Sorry, your order delivery has been renounced.`
+                        body: 'Sorry, your order delivery has been renounced.'
                     } as Notification,
                     new Map<string, string>([
                         ['call_id', bidModel.callId]
@@ -360,7 +316,7 @@ exports.onBidUpdated = onRequest(async (req: Request, res: Response) => {
     }
 });
 
-exports.searchCallsInArea = onRequest(async (req: Request, res: Response) => {
+exports.searchCallsInArea = onRequest(async (req: Request, res) => {
     const searchCriteria = req.body as CallsSearchCriteria;
     const geoService = new GcGeoService();
     try {
@@ -368,19 +324,22 @@ exports.searchCallsInArea = onRequest(async (req: Request, res: Response) => {
         res.status(200).send({success: true, message: `Success!! Found ${calls.length} calls`, data: calls});
     } catch (e) {
         functions.logger.error(e);
-        res.status(400).send({success: false, message: `Bad Request. Operation failed`, data: []} as ResponseBody);
+        res.status(400).send({success: false, message: 'Bad Request. Operation failed', data: []} as ResponseBody);
     }
 });
 
-exports.computeGeoHash = onRequest(async (req: Request, res: Response) => {
+exports.computeGeoHash = onRequest(async (req: Request, res) => {
     const callsSearchRequest = req.body as GeohashCallsSearchRequest;
     try {
         const deliveryGeoPoint: GeoPoint = callsSearchRequest.deliveryAddressGeoRequest.geoPoint;
-        const deliveryGeo = geohashQueryBounds([deliveryGeoPoint.latitude, deliveryGeoPoint.longitude], callsSearchRequest.deliveryAddressGeoRequest.radius);
+        const deliveryCenter : Geopoint = [deliveryGeoPoint.latitude, deliveryGeoPoint.longitude];
+        const deliveryRadius: number = callsSearchRequest.deliveryAddressGeoRequest.radius;
+        const deliveryGeo = geohashQueryBounds(deliveryCenter, deliveryRadius);
         const searchResponse: GeohashCallsSearchResponse = {deliveryAddressGeoResponse: {geohashRanges: deliveryGeo} as GeohashResponse};
         if (callsSearchRequest.pickupAddressGeoRequest !== undefined) {
             const pickupGeoPoint: GeoPoint = callsSearchRequest.pickupAddressGeoRequest.geoPoint;
-            const pickupGeo = geohashQueryBounds([pickupGeoPoint.latitude, pickupGeoPoint.longitude], callsSearchRequest.pickupAddressGeoRequest.radius);
+            const pickupCenter: Geopoint = [pickupGeoPoint.latitude, pickupGeoPoint.longitude];
+            const pickupGeo = geohashQueryBounds(pickupCenter, callsSearchRequest.pickupAddressGeoRequest.radius);
             searchResponse.pickupAddressGeoResponse = {geohashRanges: pickupGeo} as GeohashResponse;
         }
         res.status(200).send({success: true, message: 'GeoHashRanges retrieved successfully', data: searchResponse} as ResponseBody);
@@ -389,3 +348,245 @@ exports.computeGeoHash = onRequest(async (req: Request, res: Response) => {
         res.status(400).send({success: false, message: 'Bad Request. Operation failed', data: []} as ResponseBody);
     }
 });
+
+// Trigger when a file is uploaded/finalized
+export const onFileUploaded = onObjectFinalized({region: 'europe-west1'}, async (event) => {
+    const object = event.data;
+    const filePath = object.name; // e.g., "profile_photos/customer-uuid.jpg"
+    const bucket = object.bucket;
+
+    console.log('File uploaded:', filePath);
+
+    // Only process profile photos
+    if (!filePath.startsWith('profile_photos/')) {
+        console.log('Not a profile photo, ignoring');
+        return;
+    }
+
+    const filename = filePath.split('/').pop()!;
+    const customerUuid = filename.split('.')[0];
+
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(filePath)}?alt=media`;
+
+    try {
+        // Fetch all documents that need updating
+        const [bidderBids, callerBids, calls] = await Promise.all([
+            db.collection('live_bids').where('bidder_id', '==', customerUuid).get(),
+            db.collection('live_bids').where('caller_id', '==', customerUuid).get(),
+            db.collection('live_calls').where('caller_id', '==', customerUuid).get()
+        ]);
+
+        // Use batch writes for efficiency
+        const batch = db.batch();
+
+        // Update live_bids as bidder
+        bidderBids.docs.forEach(doc => {
+            batch.update(doc.ref, {
+                bidder_photo: publicUrl
+            });
+        });
+
+        // Update live_bids as caller
+        callerBids.docs.forEach(doc => {
+            batch.update(doc.ref, {
+                caller_photo: publicUrl
+            });
+        });
+
+        // Update live_calls as caller
+        calls.docs.forEach(doc => {
+            batch.update(doc.ref, {
+                caller_photo: publicUrl
+            });
+        });
+
+        await batch.commit();
+
+        console.log(`Updated customer and ${bidderBids.size} bidder_bids, ${callerBids.size} caller_bids, ${calls.size} calls`);
+    } catch (error) {
+        console.error('Error updating Firestore:', error);
+    }
+});
+
+// Trigger when a file is deleted
+export const onFileDeleted = onObjectDeleted({region: 'europe-west1'}, async (event) => {
+    const object = event.data;
+    const filePath = object.name;
+
+    if (!filePath.startsWith('profile_photos/')) {
+        return;
+    }
+
+    const filename = filePath.split('/').pop()!;
+    const customerUuid = filename.split('.')[0];
+
+    try {
+        // Remove bidder_photo from live_bids where bidder_id = customerUuid
+        const bidderBidsSnapshot = await db.collection('live_bids')
+            .where('bidder_id', '==', customerUuid)
+            .get();
+
+        const bidderBidsUpdates = bidderBidsSnapshot.docs.map(doc =>
+            doc.ref.update({
+                bidder_photo: FieldValue.delete()
+            })
+        );
+        await Promise.all(bidderBidsUpdates);
+        console.log(`Removed bidder_photo from ${bidderBidsSnapshot.size} live_bids`);
+
+        // Remove caller_photo from live_bids where caller_id = customerUuid
+        const callerBidsSnapshot = await db.collection('live_bids')
+            .where('caller_id', '==', customerUuid)
+            .get();
+
+        const callerBidsUpdates = callerBidsSnapshot.docs.map(doc =>
+            doc.ref.update({
+                caller_photo: FieldValue.delete()
+            })
+        );
+        await Promise.all(callerBidsUpdates);
+        console.log(`Removed caller_photo from ${callerBidsSnapshot.size} live_bids`);
+
+        // Remove caller_photo from live_calls where caller_id = customerUuid
+        const callsSnapshot = await db.collection('live_calls')
+            .where('caller_id', '==', customerUuid)
+            .get();
+
+        const callsUpdates = callsSnapshot.docs.map(doc =>
+            doc.ref.update({
+                caller_photo: FieldValue.delete()
+            })
+        );
+        await Promise.all(callsUpdates);
+        console.log(`Removed caller_photo from ${callsSnapshot.size} live_calls`);
+    } catch (error) {
+        console.error('Error updating Firestore:', error);
+    }
+});
+
+/**
+ * More efficient helper - finds photo with any extension using prefix search
+ */
+async function getProfilePhotoUrl(userId: string): Promise<string | null> {
+    const bucket = storage.bucket(BUCKET_NAME);
+    const prefix = `profile_photos/${userId}.`;
+
+    try {
+        const [files] = await bucket.getFiles({prefix, maxResults: 1});
+
+        if (files.length > 0) {
+            const file = files[0];
+            const filePath = file.name;
+            const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${BUCKET_NAME}/o/${encodeURIComponent(filePath)}?alt=media`;
+            console.log(`Found photo for user ${userId}: ${filePath}`);
+            return publicUrl;
+        }
+    } catch (error) {
+        console.error(`Error finding photo for user ${userId}:`, error);
+    }
+
+    console.log(`No photo found for user ${userId}`);
+    return null;
+}
+
+/**
+ * Trigger when a document is created in live_bids
+ * Check for bidder and caller photos and update the document
+ */
+export const onLiveBidCreated = onDocumentCreated(
+    {
+        document: 'live_bids/{bidId}',
+        region: 'europe-west1'
+    },
+    async (event) => {
+        const snapshot = event.data;
+        if (!snapshot) {
+            console.log('No data associated with the event');
+            return;
+        }
+
+        const bidData = snapshot.data();
+        const bidId = event.params.bidId;
+        const bidderId = bidData.bidder_id;
+        const callerId = bidData.caller_id;
+
+        console.log(`New bid created: ${bidId}, bidder: ${bidderId}, caller: ${callerId}`);
+
+        const updates: { [key: string]: string } = {};
+
+        // Check for bidder photo
+        if (bidderId) {
+            const bidderPhotoUrl = await getProfilePhotoUrl(bidderId);
+            if (bidderPhotoUrl) {
+                updates.bidder_photo = bidderPhotoUrl;
+                console.log(`Setting bidder_photo for bid ${bidId}`);
+            }
+        }
+
+        // Check for caller photo
+        if (callerId) {
+            const callerPhotoUrl = await getProfilePhotoUrl(callerId);
+            if (callerPhotoUrl) {
+                updates.caller_photo = callerPhotoUrl;
+                console.log(`Setting caller_photo for bid ${bidId}`);
+            }
+        }
+
+        // Update document if we found any photos
+        if (Object.keys(updates).length > 0) {
+            try {
+                await db.collection('live_bids').doc(bidId).update(updates);
+                console.log(`Updated bid ${bidId} with photos:`, updates);
+            } catch (error) {
+                console.error(`Error updating bid ${bidId}:`, error);
+            }
+        } else {
+            console.log(`No photos found for bid ${bidId}`);
+        }
+    }
+);
+
+/**
+ * Trigger when a document is created in live_calls
+ * Check for caller photo and update the document
+ */
+export const onLiveCallCreated = onDocumentCreated(
+    {
+        document: 'live_calls/{callId}',
+        region: 'europe-west1'
+    },
+    async (event) => {
+        const snapshot = event.data;
+        if (!snapshot) {
+            console.log('No data associated with the event');
+            return;
+        }
+
+        const callData = snapshot.data();
+        const callId = event.params.callId;
+        const callerId = callData.caller_id;
+
+        console.log(`New call created: ${callId}, caller: ${callerId}`);
+
+        if (!callerId) {
+            console.log(`No caller_id found for call ${callId}`);
+            return;
+        }
+
+        // Check for caller photo
+        const callerPhotoUrl = await getProfilePhotoUrl(callerId);
+
+        if (callerPhotoUrl) {
+            try {
+                await db.collection('live_calls').doc(callId).update({
+                    caller_photo: callerPhotoUrl
+                });
+                console.log(`Updated call ${callId} with caller_photo: ${callerPhotoUrl}`);
+            } catch (error) {
+                console.error(`Error updating call ${callId}:`, error);
+            }
+        } else {
+            console.log(`No photo found for caller ${callerId} in call ${callId}`);
+        }
+    }
+);

@@ -8,5 +8,14 @@
       "firebase-debug.*.log"
     ],
     "predeploy": "npm --prefix functions run build"
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
   }
 }
