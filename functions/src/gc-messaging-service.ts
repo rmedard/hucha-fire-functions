@@ -19,36 +19,40 @@ export class GcMessagingService {
      * @param {Notification} notification The actual notification object
      * @param {Map<string, string>} data Data to be sent back
      */
-    async sendNotification(targetCustomerId: string, notificationType: string, notification: Notification, data: Map<string, string>): Promise<void> {
+    async sendNotification(
+        targetCustomerId: string,
+        notificationType: string,
+        notification: Notification,
+        data: Map<string, string>): Promise<void> {
         const projectId = admin.instanceId().app.options.projectId ?? 'unknown';
         const firestore = new Firestore({projectId: projectId});
-        firestore
-            .collection('user_devices')
-            .doc(targetCustomerId)
+        firestore.collection('user_devices')
+            .where('user_id', '==', targetCustomerId)
             .get()
-            .then(async (doc) => {
-                if (doc.exists) {
-                    const deviceData = doc.data() as DocumentData;
-                    const dataSet = data.set('notification_type', notificationType);
-                    admin.messaging().send(
-                        {
-                            notification: notification,
-                            android: {
-                                notification: {
-                                    title: notification.title,
-                                    body: notification.body
-                                } as AndroidNotification
-                            } as AndroidConfig,
-                            data: Object.fromEntries(dataSet.entries()),
-                            token: deviceData.device_id
-                        } as TokenMessage)
-                        .then((messageId) => functions.logger.info(`Notification: ${messageId} sent to FCM`))
-                        .catch((err) => functions.logger.error(`Sending notification to customer ${targetCustomerId} failed`, err));
-                } else {
-                    functions.logger.error(`Sending notification failed. Device unknown for customer ${targetCustomerId}`);
-                }
-            })
-            .catch((err) => functions.logger.error('Fetching user device failed', err));
+            .then(async (docs) => {
+                docs.forEach(doc => {
+                    if (doc.exists) {
+                        const deviceData = doc.data() as DocumentData;
+                        const dataSet = data.set('notification_type', notificationType);
+                        admin.messaging().send(
+                            {
+                                notification: notification,
+                                android: {
+                                    notification: {
+                                        title: notification.title,
+                                        body: notification.body
+                                    } as AndroidNotification
+                                } as AndroidConfig,
+                                data: Object.fromEntries(dataSet.entries()),
+                                token: deviceData.device_id
+                            } as TokenMessage)
+                            .then((messageId) => functions.logger.info(`Notification: ${messageId} sent to FCM`))
+                            .catch((err) => functions.logger.error(`Sending notification to customer ${targetCustomerId} failed`, err));
+                    } else {
+                        functions.logger.error(`Sending notification failed. Device unknown for customer ${targetCustomerId}`);
+                    }
+                });
+            }).catch((err) => functions.logger.error('Fetching user device failed', err));
         await firestore
             .collection('notifications')
             .add({

@@ -2,6 +2,7 @@ import {firestore} from 'firebase-admin';
 import DocumentData = firestore.DocumentData;
 import GeoPoint = firestore.GeoPoint;
 import {GeohashRange} from 'geofire-common';
+import Timestamp = firestore.Timestamp;
 
 /**
  *
@@ -143,6 +144,14 @@ export interface Bid {
     callAmount: number,
     bargainAmount: number,
     bargainReplyAmount: number
+}
+
+export interface DeviceData {
+    userId: string,
+    deviceId: string,
+    fcmToken: string,
+    platform: string,
+    updated_at: Timestamp
 }
 
 export interface CustomerDevice {

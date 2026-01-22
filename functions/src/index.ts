@@ -18,7 +18,7 @@ import {onObjectDeleted, onObjectFinalized} from 'firebase-functions/v2/storage'
 import FieldValue = firestore.FieldValue;
 import {getFirestore} from 'firebase-admin/firestore';
 import {getStorage} from 'firebase-admin/storage';
-import {onDocumentCreated} from 'firebase-functions/v2/firestore';
+import {onDocumentCreated, onDocumentUpdated} from 'firebase-functions/v2/firestore';
 
 admin.initializeApp();
 const db = getFirestore();
@@ -36,7 +36,7 @@ const BUCKET_NAME = 'dinger-cash-344019.appspot.com';
 
 exports.stripePayment = onRequest(async (req: Request, res) => {
     const secretKey = process.env.STRIPE_TESTKEY as string;
-    const apiVersionDate = '2025-09-30.clover';
+    const apiVersionDate = '2025-12-15.clover';
 
     const stripe = new Stripe(secretKey, {
         apiVersion: apiVersionDate, typescript: true
@@ -587,6 +587,49 @@ export const onLiveCallCreated = onDocumentCreated(
             }
         } else {
             console.log(`No photo found for caller ${callerId} in call ${callId}`);
+        }
+    }
+);
+
+
+export const onLiveCallExecutorAssigned = onDocumentUpdated(
+    {
+        document: 'live_calls/{callId}',
+        region: 'europe-west1'
+    },
+    async (event) => {
+        const beforeData = event.data?.before.data();
+        const afterData = event.data?.after.data();
+
+        if (!beforeData || !afterData) {
+            console.log('No data associated with the event');
+            return;
+        }
+
+        const callId = event.params.callId;
+
+        // Only proceed if executor_id was just assigned
+        if (beforeData.executor_id || !afterData.executor_id) {
+            return;
+        }
+
+        const executorId = afterData.executor_id;
+        console.log(`Executor ${executorId} assigned to call ${callId}`);
+
+        // Fetch and set executor photo
+        const executorPhotoUrl = await getProfilePhotoUrl(executorId);
+
+        if (executorPhotoUrl) {
+            try {
+                await db.collection('live_calls').doc(callId).update({
+                    executor_photo: executorPhotoUrl
+                });
+                console.log(`Updated call ${callId} with executor_photo: ${executorPhotoUrl}`);
+            } catch (error) {
+                console.error(`Error updating call ${callId}:`, error);
+            }
+        } else {
+            console.log(`No photo found for executor ${executorId}`);
         }
     }
 );
